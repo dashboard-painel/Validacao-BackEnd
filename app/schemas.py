@@ -61,6 +61,21 @@ class DivergenciaResponse(BaseModel):
     }
 
 
+class FarmaciaStatusResponse(BaseModel):
+    """Status de migração de uma farmácia no Business Connect."""
+
+    cod_farmacia: str = Field(..., description="Código da farmácia")
+    coletor_novo: str = Field(
+        ...,
+        description=(
+            "Status do coletor: "
+            "'OK, sem registro' | "
+            "'Pendente de envio no dia YYYY-MM-DD' | "
+            "'Indisponível'"
+        ),
+    )
+
+
 class ComparacaoResponse(BaseModel):
     """Resultado completo de uma comparação entre Q1 e Q2."""
 
@@ -73,6 +88,10 @@ class ComparacaoResponse(BaseModel):
     divergencias: list[DivergenciaResponse] = Field(
         default_factory=list,
         description="Lista detalhada das divergências",
+    )
+    status_farmacias: list[FarmaciaStatusResponse] = Field(
+        default_factory=list,
+        description="Status de migração de todas as farmácias (q1 + q2) no Business Connect",
     )
 
     model_config = {

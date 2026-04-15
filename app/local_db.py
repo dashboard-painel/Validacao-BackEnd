@@ -75,6 +75,15 @@ def init_local_db():
                     ultima_hora_venda_SilverSTGN_Dedup TIME,
                     tipo_divergencia VARCHAR(50) NOT NULL
                 );
+
+                ALTER TABLE divergencias ADD COLUMN IF NOT EXISTS coletor_novo TEXT;
+
+                CREATE TABLE IF NOT EXISTS status_farmacias (
+                    id SERIAL PRIMARY KEY,
+                    comparacao_id INTEGER REFERENCES comparacoes(id),
+                    cod_farmacia VARCHAR(50) NOT NULL,
+                    coletor_novo TEXT NOT NULL
+                );
             """)
         conn.commit()
 
@@ -130,3 +139,34 @@ def salvar_comparacao(
 
         conn.commit()
         return comparacao_id
+
+
+def salvar_status_farmacias(comparacao_id: int, status_farmacias: dict[str, str]) -> None:
+    """Persiste o status de migração das farmácias no PostgreSQL local.
+
+    Para cada farmácia em status_farmacias:
+    1. Insere na tabela status_farmacias
+    2. Atualiza coletor_novo na tabela divergencias (se a farmácia tiver divergência)
+
+    Args:
+        comparacao_id: ID da comparação na tabela comparacoes
+        status_farmacias: Dict {cod_farmacia: coletor_novo}
+    """
+    if not status_farmacias:
+        return
+
+    with get_local_connection() as conn:
+        with conn.cursor() as cur:
+            for cod_farmacia, coletor_novo in status_farmacias.items():
+                cur.execute("""
+                    INSERT INTO status_farmacias (comparacao_id, cod_farmacia, coletor_novo)
+                    VALUES (%s, %s, %s)
+                """, (comparacao_id, cod_farmacia, coletor_novo))
+
+                cur.execute("""
+                    UPDATE divergencias
+                    SET coletor_novo = %s
+                    WHERE comparacao_id = %s AND cod_farmacia = %s
+                """, (coletor_novo, comparacao_id, cod_farmacia))
+
+        conn.commit()

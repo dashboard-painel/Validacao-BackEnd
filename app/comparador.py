@@ -40,6 +40,7 @@ class ResultadoComparacao:
     total_divergencias: int
     divergencias: list[Divergencia] = field(default_factory=list)
     comparacao_id: Optional[int] = None  # ID no banco local após salvar
+    todas_farmacias: set = field(default_factory=set)  # union de q1 + q2
 
 
 def comparar_resultados(associacao: str, dat_emissao: str, salvar: bool = True) -> ResultadoComparacao:
@@ -113,7 +114,8 @@ def comparar_resultados(associacao: str, dat_emissao: str, salvar: bool = True) 
         total_q1=len(resultados_q1),
         total_q2=len(resultados_q2),
         total_divergencias=len(divergencias),
-        divergencias=divergencias
+        divergencias=divergencias,
+        todas_farmacias=todas_farmacias,  # set já calculado na linha 67
     )
 
     if salvar:
