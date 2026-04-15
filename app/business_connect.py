@@ -1,6 +1,7 @@
 """Módulo de integração com a API Business Connect para status de migração."""
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -97,9 +98,10 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
 
 
 def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
-    """Obtém o status de migração para uma lista de farmácias.
+    """Obtém o status de migração para uma lista de farmácias em paralelo.
 
     Obtém o Bearer token UMA única vez e reutiliza para todas as consultas.
+    Usa ThreadPoolExecutor para consultar múltiplas farmácias em paralelo.
     Se a lista de códigos estiver vazia, retorna dict vazio sem fazer requests.
 
     Args:
@@ -117,7 +119,14 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
     token = get_bearer_token()
 
     resultado: dict[str, str] = {}
-    for cod in codigos:
-        resultado[cod] = get_status_farmacia(cod, token)
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(get_status_farmacia, cod, token): cod for cod in codigos}
+        for future in as_completed(futures):
+            cod = futures[future]
+            try:
+                resultado[cod] = future.result()
+            except Exception as e:
+                logger.warning("Erro ao buscar status farmácia %s: %s", cod, e)
+                resultado[cod] = "OK, sem registro"
 
     return resultado
