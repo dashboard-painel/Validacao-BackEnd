@@ -70,15 +70,16 @@ Content-Type: application/json
       "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
       "ultima_hora_venda_SilverSTGN_Dedup": "18:55:10",
       "tipo_divergencia": "data_diferente"
+    }
+  ],
+  "status_farmacias": [
+    {
+      "cod_farmacia": "30559",
+      "coletor_novo": "Pendente de envio no dia 2026-04-10"
     },
     {
       "cod_farmacia": "24434",
-      "nome_farmacia": null,
-      "ultima_venda_GoldVendas": null,
-      "ultima_hora_venda_GoldVendas": null,
-      "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
-      "ultima_hora_venda_SilverSTGN_Dedup": "19:39:00",
-      "tipo_divergencia": "apenas_q2"
+      "coletor_novo": "OK, sem registro"
     }
   ]
 }
@@ -95,6 +96,7 @@ Content-Type: application/json
 | `total_divergencias` | number | Quantidade de divergências encontradas |
 | `comparacao_id` | number | ID do registro salvo no histórico local |
 | `divergencias` | array | Lista de divergências (pode ser vazia `[]`) |
+| `status_farmacias` | array | Status de migração de **todas** as farmácias (q1 + q2) |
 
 ### Campos de cada divergência
 
@@ -107,6 +109,23 @@ Content-Type: application/json
 | `ultima_venda_SilverSTGN_Dedup` | string \| null | Última venda em `silver.cadcvend_staging_dedup` |
 | `ultima_hora_venda_SilverSTGN_Dedup` | string \| null | Hora da última venda em `silver.cadcvend_staging_dedup` |
 | `tipo_divergencia` | string | Tipo da divergência (ver abaixo) |
+
+### Campos de cada item em `status_farmacias`
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `cod_farmacia` | string | Código da farmácia |
+| `coletor_novo` | string | Status de migração no Business Connect |
+
+### Valores possíveis de `coletor_novo`
+
+| Valor | Significa |
+|-------|-----------|
+| `"OK, sem registro"` | Farmácia sem pendência de envio (sem registro de `cadcvend`) |
+| `"Pendente de envio no dia YYYY-MM-DD"` | Há pendência registrada — a data indica quando o envio foi capturado |
+| `"Indisponível"` | API Business Connect não respondeu (temporário — não indica erro da farmácia) |
+
+> **Dica:** `status_farmacias` cobre **todas** as farmácias (com ou sem divergência). Use `cod_farmacia` para fazer o join com `divergencias` e exibir o `coletor_novo` de cada linha na tabela.
 
 ### Tipos de divergência
 
