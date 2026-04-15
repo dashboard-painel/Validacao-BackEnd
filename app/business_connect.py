@@ -10,9 +10,9 @@ _BC_BASE_URL = "https://business-connect.triercloud.com.br/v1"
 
 
 def get_bearer_token() -> str:
-    """Autentica no Business Connect via HTTP Basic Auth e retorna o Bearer token.
+    """Autentica no Business Connect via form POST e retorna o Bearer token.
 
-    Usa as variáveis de ambiente BC_USERNAME e BC_PASSWORD.
+    Usa as variáveis de ambiente BC_USERNAME (campo 'code') e BC_PASSWORD.
 
     Returns:
         str: Bearer token para usar no header Authorization
@@ -25,7 +25,7 @@ def get_bearer_token() -> str:
 
     response = requests.post(
         f"{_BC_BASE_URL}/auth",
-        auth=(username, password),
+        data={"code": username, "password": password},
         timeout=10,
     )
 
