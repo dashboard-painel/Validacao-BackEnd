@@ -26,7 +26,7 @@ def get_bearer_token() -> str:
     response = requests.post(
         f"{_BC_BASE_URL}/auth",
         data={"code": username, "password": password},
-        timeout=10,
+        timeout=30,
     )
 
     if response.status_code != 200:
@@ -36,7 +36,7 @@ def get_bearer_token() -> str:
 
     data = response.json()
     # A API pode retornar o token sob chaves diferentes — tentamos as mais comuns
-    token = data.get("access_token") or data.get("token") or data.get("accessToken")
+    token = data.get("access") or data.get("access_token") or data.get("token") or data.get("accessToken")
     if not token:
         raise Exception(
             f"Business Connect auth: token não encontrado na resposta. Chaves disponíveis: {list(data.keys())}"
@@ -64,7 +64,7 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
         response = requests.get(
             url,
             headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
+            timeout=30,
         )
     except requests.RequestException as e:
         logger.warning("Business Connect request falhou para farmácia %s: %s", cod_farmacia, e)
