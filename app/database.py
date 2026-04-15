@@ -19,8 +19,18 @@ def get_connection_config() -> dict:
     Raises:
         ValueError: If required environment variables are missing
     """
-    required_vars = ["REDSHIFT_HOST", "REDSHIFT_DATABASE", "REDSHIFT_USER", "REDSHIFT_PASSWORD"]
+    required_vars = ["REDSHIFT_HOST", "REDSHIFT_USER"]
     missing = [var for var in required_vars if not os.getenv(var)]
+
+    # Suporta REDSHIFT_DATABASE ou REDSHIFT_NAME
+    database = os.getenv("REDSHIFT_DATABASE") or os.getenv("REDSHIFT_NAME")
+    if not database:
+        missing.append("REDSHIFT_DATABASE (or REDSHIFT_NAME)")
+
+    # Suporta REDSHIFT_PASSWORD ou REDSHIFT_PASS
+    password = os.getenv("REDSHIFT_PASSWORD") or os.getenv("REDSHIFT_PASS")
+    if not password:
+        missing.append("REDSHIFT_PASSWORD (or REDSHIFT_PASS)")
 
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
@@ -28,9 +38,9 @@ def get_connection_config() -> dict:
     return {
         "host": os.getenv("REDSHIFT_HOST"),
         "port": int(os.getenv("REDSHIFT_PORT", "5439")),
-        "database": os.getenv("REDSHIFT_DATABASE"),
+        "database": database,
         "user": os.getenv("REDSHIFT_USER"),
-        "password": os.getenv("REDSHIFT_PASSWORD"),
+        "password": password,
     }
 
 
