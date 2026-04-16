@@ -112,27 +112,59 @@ curl -X POST "http://localhost:8000/comparar" \
   -d '{"associacao": "123"}'
 ```
 
-### `GET /historico/{comparacao_id}/consolidado` — Histórico Consolidado
+### `GET /historico` — Tabela completa
 
-Retorna o FULL OUTER JOIN de GoldVendas + SilverSTGN_Dedup de uma comparação salva.
+Retorna todas as farmácias de todas as associações (última comparação de cada uma), com `coletor_novo` e `tipo_divergencia` embutidos. Ideal para carregar o dashboard sem parâmetros.
+
+```bash
+curl "http://localhost:8000/historico"
+```
+
+### `GET /historico/{associacao}` — Filtro por associação
+
+Mesma estrutura do `GET /historico`, mas filtrado para uma associação específica.
+
+```bash
+curl "http://localhost:8000/historico/123"
+```
+
+**Campos da resposta (ambos os endpoints):**
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `associacao` | string | Código da associação |
+| `cod_farmacia` | string | Código da farmácia |
+| `nome_farmacia` | string \| null | Nome da farmácia |
+| `cnpj` | string \| null | CNPJ sem formatação (14 dígitos) |
+| `ultima_venda_GoldVendas` | string \| null | Última venda em `associacao.vendas` |
+| `ultima_hora_venda_GoldVendas` | string \| null | Hora da última venda em `associacao.vendas` |
+| `ultima_venda_SilverSTGN_Dedup` | string \| null | Última venda em `silver.cadcvend_staging_dedup` |
+| `ultima_hora_venda_SilverSTGN_Dedup` | string \| null | Hora da última venda em `silver.cadcvend_staging_dedup` |
+| `coletor_novo` | string \| null | Status no Business Connect |
+| `tipo_divergencia` | string \| null | Tipo de divergência (`null` = sem divergência) |
 
 **Erros:**
 
 | Código | Descrição |
 |--------|-----------|
-| 404 | Comparação não encontrada |
+| 404 | Associação não encontrada (apenas `/historico/{associacao}`) |
 | 503 | Erro ao acessar o banco local |
 
 ## Fluxo Interno
 
 ```
-GET /comparar?associacao=X
+POST /comparar?associacao=X  (ou GET)
        │
        ├─ Redshift [GoldVendas]        → última venda por farmácia em associacao.vendas
        ├─ Redshift [SilverSTGN_Dedup]  → última venda por farmácia em silver.cadcvend_staging_dedup
+       ├─ Redshift [cadfilia/dimensao] → enriquece nome/CNPJ de farmácias silver-only
        ├─ Comparação por cod_farmacia  → detecta divergências
        ├─ Business Connect (paralelo)  → status de migração de todas as farmácias
        └─ PostgreSQL local             → persiste resultado e histórico
+
+GET /historico
+       └─ PostgreSQL local             → última comparação de cada associação, com JOIN
+                                         em status_farmacias e divergencias
 ```
 
 ## Observações

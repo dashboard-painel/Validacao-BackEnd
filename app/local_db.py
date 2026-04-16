@@ -184,23 +184,81 @@ def salvar_comparacao(
         return comparacao_id
 
 
-def buscar_resultados_consolidados(comparacao_id: int) -> list[dict]:
-    """Busca os resultados consolidados de uma comparação no PostgreSQL local."""
+def buscar_todos_consolidados() -> list[dict]:
+    """Retorna todas as farmácias de todas as associações (última comparação de cada uma).
+
+    Returns:
+        Lista com todas as farmácias, incluindo associacao, coletor_novo e tipo_divergencia
+    """
     with get_local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT
-                    cod_farmacia,
-                    nome_farmacia,
-                    cnpj,
-                    ultima_venda_GoldVendas::text,
-                    ultima_hora_venda_GoldVendas::text,
-                    ultima_venda_SilverSTGN_Dedup::text,
-                    ultima_hora_venda_SilverSTGN_Dedup::text
-                FROM resultados_consolidados
-                WHERE comparacao_id = %s
-                ORDER BY cod_farmacia
-            """, (comparacao_id,))
+                    c.associacao,
+                    rc.cod_farmacia,
+                    rc.nome_farmacia,
+                    rc.cnpj,
+                    rc.ultima_venda_GoldVendas::text,
+                    rc.ultima_hora_venda_GoldVendas::text,
+                    rc.ultima_venda_SilverSTGN_Dedup::text,
+                    rc.ultima_hora_venda_SilverSTGN_Dedup::text,
+                    sf.coletor_novo,
+                    d.tipo_divergencia
+                FROM resultados_consolidados rc
+                JOIN comparacoes c ON c.id = rc.comparacao_id
+                LEFT JOIN status_farmacias sf
+                    ON sf.comparacao_id = rc.comparacao_id AND sf.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN divergencias d
+                    ON d.comparacao_id = rc.comparacao_id AND d.cod_farmacia = rc.cod_farmacia
+                WHERE c.id IN (
+                    SELECT DISTINCT ON (associacao) id
+                    FROM comparacoes
+                    ORDER BY associacao, executado_em DESC
+                )
+                ORDER BY c.associacao, rc.cod_farmacia
+            """)
+            return [dict(row) for row in cur.fetchall()]
+
+
+def buscar_consolidado_por_associacao(associacao: str) -> list[dict]:
+    """Busca os resultados consolidados da comparação mais recente de uma associação.
+
+    Faz JOIN com status_farmacias (coletor_novo) e divergencias (tipo_divergencia).
+
+    Args:
+        associacao: Código da associação
+
+    Returns:
+        Lista de registros com dados de ambas as fontes, status do coletor e tipo de divergência
+    """
+    with get_local_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT
+                    rc.cod_farmacia,
+                    rc.nome_farmacia,
+                    rc.cnpj,
+                    rc.ultima_venda_GoldVendas::text,
+                    rc.ultima_hora_venda_GoldVendas::text,
+                    rc.ultima_venda_SilverSTGN_Dedup::text,
+                    rc.ultima_hora_venda_SilverSTGN_Dedup::text,
+                    sf.coletor_novo,
+                    d.tipo_divergencia
+                FROM resultados_consolidados rc
+                JOIN comparacoes c ON c.id = rc.comparacao_id
+                LEFT JOIN status_farmacias sf
+                    ON sf.comparacao_id = rc.comparacao_id AND sf.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN divergencias d
+                    ON d.comparacao_id = rc.comparacao_id AND d.cod_farmacia = rc.cod_farmacia
+                WHERE c.associacao = %s
+                  AND c.id = (
+                      SELECT id FROM comparacoes
+                      WHERE associacao = %s
+                      ORDER BY executado_em DESC
+                      LIMIT 1
+                  )
+                ORDER BY rc.cod_farmacia
+            """, (associacao, associacao))
             return [dict(row) for row in cur.fetchall()]
 
 

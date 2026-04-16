@@ -4,29 +4,162 @@ API rodando em `http://localhost:8000` (ajustar para o host de produção).
 
 ---
 
-## Endpoint principal
+## Fluxo recomendado para o dashboard
 
-### `GET /comparar` — via query params
-
-Útil para links diretos ou chamadas simples.
-
-**URL:**
 ```
-GET http://localhost:8000/comparar?associacao={codigo}&dat_emissao={data}
+1. Ao abrir o frontend
+   └─ GET /historico  →  tabela com TODAS as farmácias de TODAS as associações
+
+2. Usuário quer filtrar por uma associação específica
+   └─ GET /historico/{associacao}  →  mesma estrutura, só uma associação
+
+3. Usuário dispara nova comparação (botão "Atualizar")
+   └─ POST /comparar  →  executa queries no Redshift e atualiza o banco local
+      └─ após o POST, recarregue GET /historico para refletir os novos dados
 ```
-
-**Parâmetros:**
-
-| Parâmetro | Tipo | Obrigatório | Exemplo | Descrição |
-|-----------|------|:-----------:|---------|-----------|
-| `associacao` | string | ✅ | `80` | Código da associação |
-| `dat_emissao` | string (YYYY-MM-DD) | ❌ | `2026-04-01` | Data mínima de emissão. **Default: 30 dias atrás** |
 
 ---
 
-### `POST /comparar` — via body JSON
+## Endpoints
 
-Ideal para formulários onde o usuário digita os parâmetros.
+### `GET /historico` — Todas as farmácias de todas as associações
+
+Tela inicial: carrega automaticamente a tabela completa com todas as farmácias de todas as associações que possuem comparações salvas.
+
+**URL:**
+```
+GET http://localhost:8000/historico
+```
+
+**Resposta (200):** array de farmácias (mesma estrutura de `/historico/{associacao}`, com campo `associacao` preenchido)
+
+```json
+[
+  {
+    "associacao": "80",
+    "cod_farmacia": "30559",
+    "nome_farmacia": "FRANQUIA PLANALTO",
+    "cnpj": "12345678000199",
+    "ultima_venda_GoldVendas": "2026-04-08",
+    "ultima_hora_venda_GoldVendas": "2026-04-08 18:30:00",
+    "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
+    "ultima_hora_venda_SilverSTGN_Dedup": "18:55:10",
+    "coletor_novo": "Pendente de envio no dia 2026-04-10",
+    "tipo_divergencia": "data_diferente"
+  },
+  {
+    "associacao": "120",
+    "cod_farmacia": "11111",
+    "nome_farmacia": "FARMÁCIA CENTRAL",
+    "cnpj": "98765432000100",
+    "ultima_venda_GoldVendas": "2026-04-14",
+    "ultima_hora_venda_GoldVendas": "2026-04-14 09:10:00",
+    "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
+    "ultima_hora_venda_SilverSTGN_Dedup": "09:10:00",
+    "coletor_novo": "OK, sem registro",
+    "tipo_divergencia": null
+  }
+]
+```
+
+**Exemplo JS:**
+```js
+const res = await fetch('http://localhost:8000/historico');
+const farmacias = await res.json();
+// Renderiza tabela com todas as farmácias
+// Para filtrar por associação no frontend: farmacias.filter(f => f.associacao === '80')
+```
+
+---
+
+### `GET /historico/{associacao}` — Farmácias de uma associação específica
+
+Retorna a tabela da **última comparação** de uma associação, útil para filtrar na tela.
+
+**URL:**
+```
+GET http://localhost:8000/historico/80
+```
+
+**Resposta (200):**
+```json
+[
+  {
+    "cod_farmacia": "30559",
+    "nome_farmacia": "FRANQUIA PLANALTO",
+    "cnpj": "12345678000199",
+    "ultima_venda_GoldVendas": "2026-04-08",
+    "ultima_hora_venda_GoldVendas": "2026-04-08 18:30:00",
+    "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
+    "ultima_hora_venda_SilverSTGN_Dedup": "18:55:10",
+    "coletor_novo": "Pendente de envio no dia 2026-04-10",
+    "tipo_divergencia": "data_diferente"
+  },
+  {
+    "cod_farmacia": "24434",
+    "nome_farmacia": "FARMÁCIA BOA SAÚDE",
+    "cnpj": "98765432000100",
+    "ultima_venda_GoldVendas": "2026-04-14",
+    "ultima_hora_venda_GoldVendas": "2026-04-14 09:10:00",
+    "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
+    "ultima_hora_venda_SilverSTGN_Dedup": "09:10:00",
+    "coletor_novo": "OK, sem registro",
+    "tipo_divergencia": null
+  }
+]
+```
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `associacao` | string | Código da associação |
+| `cod_farmacia` | string | Código da farmácia |
+| `nome_farmacia` | string \| null | Nome da farmácia |
+| `cnpj` | string \| null | CNPJ somente com dígitos (sem `.` `-` `/`) |
+| `ultima_venda_GoldVendas` | string \| null | Última venda em `associacao.vendas` |
+| `ultima_hora_venda_GoldVendas` | string \| null | Hora da última venda em `associacao.vendas` |
+| `ultima_venda_SilverSTGN_Dedup` | string \| null | Última venda em `silver.cadcvend_staging_dedup` |
+| `ultima_hora_venda_SilverSTGN_Dedup` | string \| null | Hora da última venda em `silver.cadcvend_staging_dedup` |
+| `coletor_novo` | string \| null | Status no Business Connect (ver tabela abaixo) |
+| `tipo_divergencia` | string \| null | Tipo de divergência — `null` se não há divergência |
+
+**Valores de `coletor_novo`:**
+
+| Valor | Significa |
+|-------|-----------|
+| `"OK, sem registro"` | Farmácia sem pendência de envio |
+| `"Pendente de envio no dia YYYY-MM-DD"` | Pendência registrada — a data indica quando foi capturada |
+| `"Indisponível"` | Business Connect não respondeu (temporário) |
+
+**Valores de `tipo_divergencia`:**
+
+| Valor | Significa |
+|-------|-----------|
+| `null` | Sem divergência — datas iguais nas duas fontes |
+| `"data_diferente"` | Presente nas duas fontes, mas com datas distintas |
+| `"apenas_gold_vendas"` | Presente somente em `associacao.vendas` |
+| `"apenas_silver_stgn_dedup"` | Presente somente em `silver.cadcvend_staging_dedup` |
+
+**Erros:**
+
+| Código | Descrição |
+|--------|-----------|
+| `404` | Nenhuma comparação encontrada para a associação |
+| `503` | Erro ao acessar o banco local |
+
+**Exemplo JS:**
+```js
+async function buscarDetalhes(associacao) {
+  const res = await fetch(`http://localhost:8000/historico/${associacao}`);
+  if (!res.ok) throw new Error(`Erro ${res.status}`);
+  return res.json(); // array de farmácias
+}
+```
+
+---
+
+### `POST /comparar` — Disparar nova comparação
+
+Executa as queries no Redshift e salva o resultado. Use quando o usuário quiser atualizar os dados.
 
 **URL:**
 ```
@@ -36,187 +169,63 @@ Content-Type: application/json
 
 **Body:**
 ```json
-{
-  "associacao": "80",
-  "dat_emissao": "2026-04-01"
-}
+{ "associacao": "80" }
 ```
 
-| Campo | Tipo | Obrigatório | Descrição |
-|-------|------|:-----------:|-----------|
-| `associacao` | string | ✅ | Código da associação |
-| `dat_emissao` | string (YYYY-MM-DD) | ❌ | Data mínima. **Default: 30 dias atrás** |
-
-> Ambos os endpoints retornam **a mesma estrutura de resposta**.
-
----
-
-## Resposta de sucesso (`200 OK`)
-
+**Resposta (200):**
 ```json
 {
   "associacao": "80",
-  "dat_emissao_filtro": "2026-03-16",
-  "total_q1": 64,
-  "total_q2": 74,
+  "total_gold_vendas": 64,
+  "total_silver_stgn_dedup": 74,
   "total_divergencias": 36,
-  "comparacao_id": 1,
-  "divergencias": [
-    {
-      "cod_farmacia": "30559",
-      "nome_farmacia": "FRANQUIA PLANALTO",
-      "ultima_venda_GoldVendas": "2026-04-08",
-      "ultima_hora_venda_GoldVendas": "2026-04-08 18:30:00",
-      "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
-      "ultima_hora_venda_SilverSTGN_Dedup": "18:55:10",
-      "tipo_divergencia": "data_diferente"
-    }
-  ],
-  "status_farmacias": [
-    {
-      "cod_farmacia": "30559",
-      "coletor_novo": "Pendente de envio no dia 2026-04-10"
-    },
-    {
-      "cod_farmacia": "24434",
-      "coletor_novo": "OK, sem registro"
-    }
-  ]
+  "comparacao_id": 3,
+  "divergencias": [ ... ],
+  "status_farmacias": [ ... ]
 }
 ```
 
-### Campos da resposta
+> Após o POST, chame `GET /historico` ou `GET /historico/{associacao}` para atualizar a tela.
 
-| Campo | Tipo | Descrição |
-|-------|------|-----------|
-| `associacao` | string | Código da associação consultada |
-| `dat_emissao_filtro` | string | Data usada como filtro (YYYY-MM-DD) |
-| `total_q1` | number | Total de farmácias em `associacao.vendas` |
-| `total_q2` | number | Total de farmácias em `silver.cadcvend_staging_dedup` |
-| `total_divergencias` | number | Quantidade de divergências encontradas |
-| `comparacao_id` | number | ID do registro salvo no histórico local |
-| `divergencias` | array | Lista de divergências (pode ser vazia `[]`) |
-| `status_farmacias` | array | Status de migração de **todas** as farmácias (q1 + q2) |
+**Erros:**
 
-### Campos de cada divergência
+| Código | Descrição |
+|--------|-----------|
+| `422` | `associacao` não informado |
+| `503` | Falha de conexão com o Redshift |
 
-| Campo | Tipo | Descrição |
-|-------|------|-----------|
-| `cod_farmacia` | string | Código da farmácia |
-| `nome_farmacia` | string \| null | Nome da farmácia (disponível apenas via Q1) |
-| `ultima_venda_GoldVendas` | string \| null | Última venda em `associacao.vendas` |
-| `ultima_hora_venda_GoldVendas` | string \| null | Hora da última venda em `associacao.vendas` |
-| `ultima_venda_SilverSTGN_Dedup` | string \| null | Última venda em `silver.cadcvend_staging_dedup` |
-| `ultima_hora_venda_SilverSTGN_Dedup` | string \| null | Hora da última venda em `silver.cadcvend_staging_dedup` |
-| `tipo_divergencia` | string | Tipo da divergência (ver abaixo) |
-
-### Campos de cada item em `status_farmacias`
-
-| Campo | Tipo | Descrição |
-|-------|------|-----------|
-| `cod_farmacia` | string | Código da farmácia |
-| `coletor_novo` | string | Status de migração no Business Connect |
-
-### Valores possíveis de `coletor_novo`
-
-| Valor | Significa |
-|-------|-----------|
-| `"OK, sem registro"` | Farmácia sem pendência de envio (sem registro de `cadcvend`) |
-| `"Pendente de envio no dia YYYY-MM-DD"` | Há pendência registrada — a data indica quando o envio foi capturado |
-| `"Indisponível"` | API Business Connect não respondeu (temporário — não indica erro da farmácia) |
-
-> **Dica:** `status_farmacias` cobre **todas** as farmácias (com ou sem divergência). Use `cod_farmacia` para fazer o join com `divergencias` e exibir o `coletor_novo` de cada linha na tabela.
-
-### Tipos de divergência
-
-| Valor | Significa |
-|-------|-----------|
-| `data_diferente` | Farmácia presente nas duas fontes, mas com datas diferentes |
-| `apenas_q1` | Farmácia presente somente em `associacao.vendas` |
-| `apenas_q2` | Farmácia presente somente em `silver.cadcvend_staging_dedup` |
-
-> **Dica de exibição:** use `tipo_divergencia` para colorir/filtrar as linhas na tabela do dashboard.
-
----
-
-## Erros
-
-| Código | Quando ocorre | `detail` |
-|--------|---------------|----------|
-| `422` | `associacao` não informado ou `dat_emissao` fora do formato YYYY-MM-DD | Mensagem do FastAPI com o campo inválido |
-| `503` | Falha de conexão com o Redshift | `"Erro de conexão com o banco de dados..."` |
-
-**Exemplo de erro 422:**
-```json
-{
-  "detail": [
-    {
-      "type": "missing",
-      "loc": ["query", "associacao"],
-      "msg": "Field required"
-    }
-  ]
-}
-```
-
-**Exemplo de erro 503:**
-```json
-{
-  "detail": "Erro de conexão com o banco de dados. Tente novamente em alguns instantes. Detalhes: InterfaceError"
-}
-```
-
----
-
-## Exemplos de chamada
-
-**JavaScript (fetch) — POST:**
+**Exemplo JS:**
 ```js
-async function buscarDivergencias(associacao, datEmissao) {
+async function atualizarComparacao(associacao) {
   const res = await fetch('http://localhost:8000/comparar', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ associacao, dat_emissao: datEmissao }),
+    body: JSON.stringify({ associacao }),
   });
-
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || `Erro ${res.status}`);
-  }
-
-  return res.json(); // → ComparacaoResponse
-}
-
-// Uso:
-const resultado = await buscarDivergencias('80', '2026-04-01');
-console.log(resultado.total_divergencias); // 36
-console.log(resultado.divergencias);       // array
-```
-
-**JavaScript (fetch) — GET:**
-```js
-async function buscarDivergencias(associacao, datEmissao) {
-  const params = new URLSearchParams({ associacao });
-  if (datEmissao) params.append('dat_emissao', datEmissao);
-
-  const res = await fetch(`http://localhost:8000/comparar?${params}`);
-
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.detail || `Erro ${res.status}`);
-  }
-
+  if (!res.ok) throw new Error((await res.json()).detail);
   return res.json();
 }
 ```
 
-**Axios — POST:**
-```js
-const { data } = await axios.post('http://localhost:8000/comparar', {
-  associacao: '80',
-  dat_emissao: '2026-04-01',
-});
+---
+
+### `GET /comparar` — Comparar via query param
+
+Alternativa ao POST para chamadas diretas.
+
 ```
+GET http://localhost:8000/comparar?associacao=80
+```
+
+---
+
+## Outros endpoints
+
+| Endpoint | Uso |
+|----------|-----|
+| `GET /` | Verifica se a API está no ar |
+| `GET /health` | Status + conectividade com Redshift |
+| `GET /docs` | Swagger UI interativo |
 
 ---
 
@@ -230,12 +239,3 @@ Para restringir a origens específicas, ajuste `CORS_ORIGINS` no `.env`:
 CORS_ORIGINS=http://localhost:3000,https://dashboard.suaempresa.com
 ```
 
----
-
-## Outros endpoints
-
-| Endpoint | Uso |
-|----------|-----|
-| `GET /` | Verifica se a API está no ar |
-| `GET /health` | Status + conectividade com Redshift |
-| `GET /docs` | Swagger UI interativo |
