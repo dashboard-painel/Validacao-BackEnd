@@ -1,7 +1,19 @@
 """Schemas Pydantic para validação e serialização de respostas da API."""
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+
+class AssociacaoResumoResponse(BaseModel):
+    """Resumo da comparação mais recente de uma associação."""
+
+    associacao: str = Field(..., description="Código da associação")
+    executado_em: datetime = Field(..., description="Data/hora da última comparação")
+    total_gold_vendas: int = Field(..., ge=0, description="Total de farmácias em associacao.vendas")
+    total_silver_stgn_dedup: int = Field(..., ge=0, description="Total de farmácias em silver.cadcvend_staging_dedup")
+    total_divergencias: int = Field(..., ge=0, description="Quantidade de divergências encontradas")
+    comparacao_id: int = Field(..., description="ID da comparação no banco local")
 
 
 class ComparacaoRequest(BaseModel):
@@ -68,15 +80,18 @@ class FarmaciaStatusResponse(BaseModel):
 
 
 class ResultadoConsolidadoResponse(BaseModel):
-    """Registro consolidado com dados de GoldVendas (associacao.vendas) e SilverSTGN_Dedup lado a lado."""
+    """Registro consolidado com dados de GoldVendas e SilverSTGN_Dedup lado a lado."""
 
+    associacao: Optional[str] = Field(None, description="Código da associação")
     cod_farmacia: str = Field(..., description="Código da farmácia")
-    nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (disponível em associacao.vendas)")
-    cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (disponível em associacao.vendas)")
+    nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia")
+    cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (somente dígitos)")
     ultima_venda_GoldVendas: Optional[str] = Field(None, description="Última venda em associacao.vendas")
     ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
     ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Última venda em silver.cadcvend_staging_dedup")
     ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")
+    coletor_novo: Optional[str] = Field(None, description="Status do coletor no Business Connect")
+    tipo_divergencia: Optional[str] = Field(None, description="Tipo de divergência, null se não há divergência")
 
 
 class ComparacaoResponse(BaseModel):

@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.business_connect import buscar_status_farmacias
 from app.comparador import comparar_resultados
-from app.local_db import buscar_resultados_consolidados, salvar_status_farmacias
-from app.schemas import ComparacaoRequest, ComparacaoResponse, DivergenciaResponse, FarmaciaStatusResponse, ResultadoConsolidadoResponse
+from app.local_db import buscar_todos_consolidados, buscar_consolidado_por_associacao, salvar_status_farmacias
+from app.schemas import AssociacaoResumoResponse, ComparacaoRequest, ComparacaoResponse, DivergenciaResponse, FarmaciaStatusResponse, ResultadoConsolidadoResponse
 
 logger = logging.getLogger(__name__)
 
@@ -136,27 +136,67 @@ async def comparar_post(body: ComparacaoRequest) -> ComparacaoResponse:
     return _executar_comparacao(body.associacao)
 
 
-@router.get("/historico/{comparacao_id}/consolidado", response_model=list[ResultadoConsolidadoResponse])
-async def historico_consolidado(comparacao_id: int) -> list[ResultadoConsolidadoResponse]:
-    """Retorna os resultados consolidados (Q1 + Q2 lado a lado) de uma comparação salva.
+@router.get("/historico", response_model=list[ResultadoConsolidadoResponse])
+async def listar_todas_farmacias() -> list[ResultadoConsolidadoResponse]:
+    """Retorna todas as farmácias de todas as associações (última comparação de cada uma).
 
-    Lê a tabela `resultados_consolidados` do banco local, que contém o FULL OUTER JOIN
-    de GoldVendas (Q1) e SilverSTGN_Dedup (Q2) por farmácia.
-
-    Args:
-        comparacao_id: ID da comparação (retornado em `comparacao_id` da resposta de /comparar)
+    Ideal para a tela inicial do dashboard: carrega a tabela completa sem precisar
+    especificar uma associação.
 
     Returns:
-        Lista de registros com dados de ambas as fontes por farmácia
+        Lista de todas as farmácias, ordenada por associacao e cod_farmacia,
+        com coletor_novo e tipo_divergencia embutidos
 
     Raises:
-        HTTPException 404: Comparação não encontrada
         HTTPException 503: Erro de conexão com o banco local
     """
     try:
-        rows = buscar_resultados_consolidados(comparacao_id)
+        rows = buscar_todos_consolidados()
     except Exception as e:
-        logger.error("Erro ao buscar resultados_consolidados: %s: %s", type(e).__name__, e)
+        logger.error("Erro ao buscar todos consolidados: %s: %s", type(e).__name__, e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Erro ao acessar o banco local. Detalhes: {type(e).__name__}",
+        )
+
+    return [
+        ResultadoConsolidadoResponse(
+            associacao=row["associacao"],
+            cod_farmacia=row["cod_farmacia"],
+            nome_farmacia=row.get("nome_farmacia"),
+            cnpj=row.get("cnpj"),
+            ultima_venda_GoldVendas=row.get("ultima_venda_goldvendas"),
+            ultima_hora_venda_GoldVendas=row.get("ultima_hora_venda_goldvendas"),
+            ultima_venda_SilverSTGN_Dedup=row.get("ultima_venda_silverstgn_dedup"),
+            ultima_hora_venda_SilverSTGN_Dedup=row.get("ultima_hora_venda_silverstgn_dedup"),
+            coletor_novo=row.get("coletor_novo"),
+            tipo_divergencia=row.get("tipo_divergencia"),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/historico/{associacao}", response_model=list[ResultadoConsolidadoResponse])
+async def historico_consolidado(associacao: str) -> list[ResultadoConsolidadoResponse]:
+    """Retorna os resultados consolidados da comparação mais recente de uma associação.
+
+    Inclui dados de ambas as fontes (GoldVendas + SilverSTGN_Dedup), status do
+    coletor no Business Connect e tipo de divergência por farmácia.
+
+    Args:
+        associacao: Código da associação
+
+    Returns:
+        Lista de farmácias com dados consolidados, coletor_novo e tipo_divergencia
+
+    Raises:
+        HTTPException 404: Nenhuma comparação encontrada para a associação
+        HTTPException 503: Erro de conexão com o banco local
+    """
+    try:
+        rows = buscar_consolidado_por_associacao(associacao)
+    except Exception as e:
+        logger.error("Erro ao buscar historico para associacao=%s: %s: %s", associacao, type(e).__name__, e)
         raise HTTPException(
             status_code=503,
             detail=f"Erro ao acessar o banco local. Detalhes: {type(e).__name__}",
@@ -165,11 +205,12 @@ async def historico_consolidado(comparacao_id: int) -> list[ResultadoConsolidado
     if not rows:
         raise HTTPException(
             status_code=404,
-            detail=f"Nenhum resultado consolidado encontrado para comparacao_id={comparacao_id}",
+            detail=f"Nenhuma comparação encontrada para associacao={associacao}",
         )
 
     return [
         ResultadoConsolidadoResponse(
+            associacao=associacao,
             cod_farmacia=row["cod_farmacia"],
             nome_farmacia=row.get("nome_farmacia"),
             cnpj=row.get("cnpj"),
@@ -177,6 +218,8 @@ async def historico_consolidado(comparacao_id: int) -> list[ResultadoConsolidado
             ultima_hora_venda_GoldVendas=row.get("ultima_hora_venda_goldvendas"),
             ultima_venda_SilverSTGN_Dedup=row.get("ultima_venda_silverstgn_dedup"),
             ultima_hora_venda_SilverSTGN_Dedup=row.get("ultima_hora_venda_silverstgn_dedup"),
+            coletor_novo=row.get("coletor_novo"),
+            tipo_divergencia=row.get("tipo_divergencia"),
         )
         for row in rows
     ]
