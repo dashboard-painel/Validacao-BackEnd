@@ -44,7 +44,7 @@ def init_local_db():
 
                 CREATE TABLE IF NOT EXISTS resultados_gold_vendas (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id),
+                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
                     cod_farmacia VARCHAR(50) NOT NULL,
                     nome_farmacia VARCHAR(255),
                     cnpj VARCHAR(30),
@@ -54,7 +54,7 @@ def init_local_db():
 
                 CREATE TABLE IF NOT EXISTS resultados_silver_stgn_dedup (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id),
+                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
                     cod_farmacia VARCHAR(50) NOT NULL,
                     ultima_venda DATE,
                     ultima_hora_venda TIME
@@ -62,7 +62,7 @@ def init_local_db():
 
                 CREATE TABLE IF NOT EXISTS resultados_consolidados (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id),
+                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
                     cod_farmacia VARCHAR(50) NOT NULL,
                     nome_farmacia VARCHAR(255),
                     cnpj VARCHAR(30),
@@ -74,7 +74,7 @@ def init_local_db():
 
                 CREATE TABLE IF NOT EXISTS divergencias (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id),
+                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
                     cod_farmacia VARCHAR(50) NOT NULL,
                     nome_farmacia VARCHAR(255),
                     cnpj VARCHAR(30),
@@ -88,7 +88,7 @@ def init_local_db():
 
                 CREATE TABLE IF NOT EXISTS status_farmacias (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id),
+                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
                     cod_farmacia VARCHAR(50) NOT NULL,
                     coletor_novo TEXT NOT NULL
                 );
@@ -117,6 +117,31 @@ def salvar_comparacao(
     """
     with get_local_connection() as conn:
         with conn.cursor() as cur:
+            # Remove execuções anteriores da mesma associação (delete em cascata manual)
+            cur.execute("""
+                DELETE FROM resultados_gold_vendas
+                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
+            """, (associacao,))
+            cur.execute("""
+                DELETE FROM resultados_silver_stgn_dedup
+                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
+            """, (associacao,))
+            cur.execute("""
+                DELETE FROM resultados_consolidados
+                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
+            """, (associacao,))
+            cur.execute("""
+                DELETE FROM divergencias
+                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
+            """, (associacao,))
+            cur.execute("""
+                DELETE FROM status_farmacias
+                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
+            """, (associacao,))
+            cur.execute("""
+                DELETE FROM comparacoes WHERE associacao = %s
+            """, (associacao,))
+
             cur.execute("""
                 INSERT INTO comparacoes (associacao, total_gold_vendas, total_silver_stgn_dedup, total_divergencias)
                 VALUES (%s, %s, %s, %s)
@@ -206,10 +231,16 @@ def buscar_todos_consolidados() -> list[dict]:
                     d.tipo_divergencia
                 FROM resultados_consolidados rc
                 JOIN comparacoes c ON c.id = rc.comparacao_id
-                LEFT JOIN status_farmacias sf
-                    ON sf.comparacao_id = rc.comparacao_id AND sf.cod_farmacia = rc.cod_farmacia
-                LEFT JOIN divergencias d
-                    ON d.comparacao_id = rc.comparacao_id AND d.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN (
+                    SELECT DISTINCT ON (comparacao_id, cod_farmacia) comparacao_id, cod_farmacia, coletor_novo
+                    FROM status_farmacias
+                    ORDER BY comparacao_id, cod_farmacia, id DESC
+                ) sf ON sf.comparacao_id = rc.comparacao_id AND sf.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN (
+                    SELECT DISTINCT ON (comparacao_id, cod_farmacia) comparacao_id, cod_farmacia, tipo_divergencia
+                    FROM divergencias
+                    ORDER BY comparacao_id, cod_farmacia, id DESC
+                ) d ON d.comparacao_id = rc.comparacao_id AND d.cod_farmacia = rc.cod_farmacia
                 WHERE c.id IN (
                     SELECT DISTINCT ON (associacao) id
                     FROM comparacoes
@@ -246,10 +277,16 @@ def buscar_consolidado_por_associacao(associacao: str) -> list[dict]:
                     d.tipo_divergencia
                 FROM resultados_consolidados rc
                 JOIN comparacoes c ON c.id = rc.comparacao_id
-                LEFT JOIN status_farmacias sf
-                    ON sf.comparacao_id = rc.comparacao_id AND sf.cod_farmacia = rc.cod_farmacia
-                LEFT JOIN divergencias d
-                    ON d.comparacao_id = rc.comparacao_id AND d.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN (
+                    SELECT DISTINCT ON (comparacao_id, cod_farmacia) comparacao_id, cod_farmacia, coletor_novo
+                    FROM status_farmacias
+                    ORDER BY comparacao_id, cod_farmacia, id DESC
+                ) sf ON sf.comparacao_id = rc.comparacao_id AND sf.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN (
+                    SELECT DISTINCT ON (comparacao_id, cod_farmacia) comparacao_id, cod_farmacia, tipo_divergencia
+                    FROM divergencias
+                    ORDER BY comparacao_id, cod_farmacia, id DESC
+                ) d ON d.comparacao_id = rc.comparacao_id AND d.cod_farmacia = rc.cod_farmacia
                 WHERE c.associacao = %s
                   AND c.id = (
                       SELECT id FROM comparacoes
