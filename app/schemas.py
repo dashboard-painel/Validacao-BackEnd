@@ -1,29 +1,18 @@
 """Schemas Pydantic para validação e serialização de respostas da API."""
-from datetime import datetime, timedelta
 from typing import Optional
 
 from pydantic import BaseModel, Field
-
-
-def _default_dat_emissao() -> str:
-    return (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
 
 
 class ComparacaoRequest(BaseModel):
     """Parâmetros para execução da comparação via POST."""
 
     associacao: str = Field(..., description="Código da associação para filtrar")
-    dat_emissao: Optional[str] = Field(
-        default=None,
-        description="Data mínima de emissão (YYYY-MM-DD). Default: 30 dias atrás",
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-    )
 
     model_config = {
         "json_schema_extra": {
             "example": {
                 "associacao": "80",
-                "dat_emissao": "2026-04-01",
             }
         }
     }
@@ -40,6 +29,7 @@ class DivergenciaResponse(BaseModel):
 
     cod_farmacia: str = Field(..., description="Código da farmácia")
     nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (quando disponível)")
+    cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (quando disponível)")
     ultima_venda_GoldVendas: Optional[str] = Field(None, description="Data da última venda em associacao.vendas (YYYY-MM-DD)")
     ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
     ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Data da última venda em silver.cadcvend_staging_dedup (YYYY-MM-DD)")
@@ -51,6 +41,7 @@ class DivergenciaResponse(BaseModel):
             "example": {
                 "cod_farmacia": "001",
                 "nome_farmacia": "Farmacia Central",
+                "cnpj": "12.345.678/0001-99",
                 "ultima_venda_GoldVendas": "2024-03-15",
                 "ultima_hora_venda_GoldVendas": "14:30:00",
                 "ultima_venda_SilverSTGN_Dedup": "2024-03-14",
@@ -81,6 +72,7 @@ class ResultadoConsolidadoResponse(BaseModel):
 
     cod_farmacia: str = Field(..., description="Código da farmácia")
     nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (disponível em associacao.vendas)")
+    cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (disponível em associacao.vendas)")
     ultima_venda_GoldVendas: Optional[str] = Field(None, description="Última venda em associacao.vendas")
     ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
     ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Última venda em silver.cadcvend_staging_dedup")
@@ -91,7 +83,6 @@ class ComparacaoResponse(BaseModel):
     """Resultado completo de uma comparação entre GoldVendas e SilverSTGN_Dedup."""
 
     associacao: str = Field(..., description="Código da associação comparada")
-    dat_emissao_filtro: str = Field(..., description="Data de emissão usada como filtro (YYYY-MM-DD)")
     total_gold_vendas: int = Field(..., ge=0, description="Total de registros em associacao.vendas")
     total_silver_stgn_dedup: int = Field(..., ge=0, description="Total de registros em silver.cadcvend_staging_dedup")
     total_divergencias: int = Field(..., ge=0, description="Quantidade de divergências encontradas")
@@ -109,7 +100,6 @@ class ComparacaoResponse(BaseModel):
         "json_schema_extra": {
             "example": {
                 "associacao": "123",
-                "dat_emissao_filtro": "2024-01-01",
                 "total_gold_vendas": 150,
                 "total_silver_stgn_dedup": 148,
                 "total_divergencias": 5,

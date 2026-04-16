@@ -1,6 +1,7 @@
 """Módulo de integração com a API Business Connect para status de migração."""
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -116,9 +117,13 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
     if not codigos:
         return {}
 
+    logger.info("⏳ Autenticando no Business Connect...")
+    t_auth = time.perf_counter()
     token = get_bearer_token()
+    logger.info("✅ Business Connect autenticado em %.2fs — consultando %d farmácias...", time.perf_counter() - t_auth, len(codigos))
 
     resultado: dict[str, str] = {}
+    t_parallel = time.perf_counter()
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = {executor.submit(get_status_farmacia, cod, token): cod for cod in codigos}
         for future in as_completed(futures):
@@ -129,4 +134,5 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
                 logger.warning("Erro ao buscar status farmácia %s: %s", cod, e)
                 resultado[cod] = "OK, sem registro"
 
+    logger.info("✅ Business Connect — %d farmácias consultadas em %.2fs", len(resultado), time.perf_counter() - t_parallel)
     return resultado

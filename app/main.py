@@ -1,4 +1,5 @@
 """FastAPI application entry point."""
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -11,6 +12,12 @@ from app.local_db import init_local_db
 from app.routers import comparar
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 
 @asynccontextmanager
