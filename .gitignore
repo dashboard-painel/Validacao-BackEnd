@@ -1,2 +1,5 @@
 .env
 .planning/
+.idea/
+__pycache__/
+*.pyc

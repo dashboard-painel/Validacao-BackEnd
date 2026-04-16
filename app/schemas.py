@@ -30,21 +30,21 @@ class ComparacaoRequest(BaseModel):
 
 
 class DivergenciaResponse(BaseModel):
-    """Representa uma farmácia com divergência entre Q1 e Q2.
+    """Representa uma farmácia com divergência entre GoldVendas e SilverSTGN_Dedup.
 
     Tipos de divergência:
     - data_diferente: presente em ambas mas com ultima_venda diferente
-    - apenas_q1: presente somente na Query 1
-    - apenas_q2: presente somente na Query 2
+    - apenas_gold_vendas: presente somente em associacao.vendas
+    - apenas_silver_stgn_dedup: presente somente em silver.cadcvend_staging_dedup
     """
 
     cod_farmacia: str = Field(..., description="Código da farmácia")
     nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (quando disponível)")
-    ultima_venda_GoldVendas: Optional[str] = Field(None, description="Data da última venda na Q1 - associacao.vendas (YYYY-MM-DD)")
-    ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda na Q1 - associacao.vendas")
-    ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Data da última venda na Q2 - silver.cadcvend_staging_dedup (YYYY-MM-DD)")
-    ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda na Q2 - silver.cadcvend_staging_dedup")
-    tipo_divergencia: str = Field(..., description="Tipo: data_diferente, apenas_q1, apenas_q2")
+    ultima_venda_GoldVendas: Optional[str] = Field(None, description="Data da última venda em associacao.vendas (YYYY-MM-DD)")
+    ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
+    ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Data da última venda em silver.cadcvend_staging_dedup (YYYY-MM-DD)")
+    ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")
+    tipo_divergencia: str = Field(..., description="Tipo: data_diferente, apenas_gold_vendas, apenas_silver_stgn_dedup")
 
     model_config = {
         "json_schema_extra": {
@@ -76,13 +76,24 @@ class FarmaciaStatusResponse(BaseModel):
     )
 
 
+class ResultadoConsolidadoResponse(BaseModel):
+    """Registro consolidado com dados de GoldVendas (associacao.vendas) e SilverSTGN_Dedup lado a lado."""
+
+    cod_farmacia: str = Field(..., description="Código da farmácia")
+    nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (disponível em associacao.vendas)")
+    ultima_venda_GoldVendas: Optional[str] = Field(None, description="Última venda em associacao.vendas")
+    ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
+    ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Última venda em silver.cadcvend_staging_dedup")
+    ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")
+
+
 class ComparacaoResponse(BaseModel):
-    """Resultado completo de uma comparação entre Q1 e Q2."""
+    """Resultado completo de uma comparação entre GoldVendas e SilverSTGN_Dedup."""
 
     associacao: str = Field(..., description="Código da associação comparada")
     dat_emissao_filtro: str = Field(..., description="Data de emissão usada como filtro (YYYY-MM-DD)")
-    total_q1: int = Field(..., ge=0, description="Total de registros na Query 1")
-    total_q2: int = Field(..., ge=0, description="Total de registros na Query 2")
+    total_gold_vendas: int = Field(..., ge=0, description="Total de registros em associacao.vendas")
+    total_silver_stgn_dedup: int = Field(..., ge=0, description="Total de registros em silver.cadcvend_staging_dedup")
     total_divergencias: int = Field(..., ge=0, description="Quantidade de divergências encontradas")
     comparacao_id: Optional[int] = Field(None, description="ID da comparação salva no banco local")
     divergencias: list[DivergenciaResponse] = Field(
@@ -91,7 +102,7 @@ class ComparacaoResponse(BaseModel):
     )
     status_farmacias: list[FarmaciaStatusResponse] = Field(
         default_factory=list,
-        description="Status de migração de todas as farmácias (q1 + q2) no Business Connect",
+        description="Status de migração de todas as farmácias (GoldVendas + SilverSTGN_Dedup) no Business Connect",
     )
 
     model_config = {
@@ -99,8 +110,8 @@ class ComparacaoResponse(BaseModel):
             "example": {
                 "associacao": "123",
                 "dat_emissao_filtro": "2024-01-01",
-                "total_q1": 150,
-                "total_q2": 148,
+                "total_gold_vendas": 150,
+                "total_silver_stgn_dedup": 148,
                 "total_divergencias": 5,
                 "comparacao_id": 42,
                 "divergencias": [],
