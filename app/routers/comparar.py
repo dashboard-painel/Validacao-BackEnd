@@ -1,17 +1,57 @@
 """Router para endpoint de comparação de dados."""
 import logging
 import time
+from datetime import date, timedelta
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.business_connect import buscar_status_farmacias
 from app.comparador import comparar_resultados
-from app.local_db import buscar_todos_consolidados, buscar_consolidado_por_associacao, salvar_status_farmacias
+from app.local_db import buscar_todos_consolidados, buscar_consolidado_por_associacao, buscar_ultima_atualizacao, salvar_status_farmacias
 from app.schemas import AssociacaoResumoResponse, ComparacaoRequest, ComparacaoResponse, DivergenciaResponse, FarmaciaStatusResponse, ResultadoConsolidadoResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["comparação"])
+
+
+def _camadas_atrasadas(
+    data_gold: Optional[str],
+    data_silver: Optional[str],
+    coletor_novo: Optional[str],
+) -> tuple[Optional[list[str]], Optional[list[str]]]:
+    """Retorna (camadas_atrasadas, camadas_sem_dados).
+
+    camadas_atrasadas — tem dado mas é velho:
+    - GoldVendas / SilverSTGN_Dedup / API: data < D-1 (apenas D-2 ou mais antigo)
+
+    camadas_sem_dados — sem nenhum registro:
+    - GoldVendas / SilverSTGN_Dedup: campo null
+    """
+    ontem = date.today() - timedelta(days=1)
+    atrasadas: list[str] = []
+    sem_dados: list[str] = []
+
+    for campo, d_str in [("GoldVendas", data_gold), ("SilverSTGN_Dedup", data_silver)]:
+        if not d_str:
+            sem_dados.append(campo)
+        else:
+            try:
+                if date.fromisoformat(str(d_str)[:10]) < ontem:
+                    atrasadas.append(campo)
+            except ValueError:
+                pass
+
+    if coletor_novo and coletor_novo.startswith("Pendente de envio no dia "):
+        data_api = coletor_novo.removeprefix("Pendente de envio no dia ").strip()
+        try:
+            if date.fromisoformat(data_api[:10]) < ontem:
+                atrasadas.append("API")
+        except ValueError:
+            pass
+
+    return (atrasadas or None, sem_dados or None)
 
 
 @router.get("/comparar", response_model=ComparacaoResponse)
@@ -77,7 +117,7 @@ def _executar_comparacao(associacao: str) -> ComparacaoResponse:
     # 3. Persistir status no banco local
     if resultado.comparacao_id is not None:
         try:
-            salvar_status_farmacias(resultado.comparacao_id, status_dict)
+            salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict)
         except Exception as e:
             logger.warning(
                 "Erro ao salvar status_farmacias no banco local (não crítico): %s: %s",
@@ -96,6 +136,10 @@ def _executar_comparacao(associacao: str) -> ComparacaoResponse:
             ultima_venda_SilverSTGN_Dedup=d.ultima_venda_SilverSTGN_Dedup,
             ultima_hora_venda_SilverSTGN_Dedup=d.ultima_hora_venda_SilverSTGN_Dedup,
             tipo_divergencia=d.tipo_divergencia,
+            **dict(zip(
+                ["camadas_atrasadas", "camadas_sem_dados"],
+                _camadas_atrasadas(d.ultima_venda_GoldVendas, d.ultima_venda_SilverSTGN_Dedup, status_dict.get(d.cod_farmacia)),
+            )),
         )
         for d in resultado.divergencias
     ]
@@ -171,6 +215,11 @@ async def listar_todas_farmacias() -> list[ResultadoConsolidadoResponse]:
             ultima_hora_venda_SilverSTGN_Dedup=row.get("ultima_hora_venda_silverstgn_dedup"),
             coletor_novo=row.get("coletor_novo"),
             tipo_divergencia=row.get("tipo_divergencia"),
+            atualizado_em=row.get("atualizado_em"),
+            **dict(zip(
+                ["camadas_atrasadas", "camadas_sem_dados"],
+                _camadas_atrasadas(row.get("ultima_venda_goldvendas"), row.get("ultima_venda_silverstgn_dedup"), row.get("coletor_novo")),
+            )),
         )
         for row in rows
     ]
@@ -220,6 +269,24 @@ async def historico_consolidado(associacao: str) -> list[ResultadoConsolidadoRes
             ultima_hora_venda_SilverSTGN_Dedup=row.get("ultima_hora_venda_silverstgn_dedup"),
             coletor_novo=row.get("coletor_novo"),
             tipo_divergencia=row.get("tipo_divergencia"),
+            atualizado_em=row.get("atualizado_em"),
+            **dict(zip(
+                ["camadas_atrasadas", "camadas_sem_dados"],
+                _camadas_atrasadas(row.get("ultima_venda_goldvendas"), row.get("ultima_venda_silverstgn_dedup"), row.get("coletor_novo")),
+            )),
         )
         for row in rows
     ]
+
+
+@router.get("/ultima-atualizacao")
+def ultima_atualizacao() -> dict:
+    """Retorna a data/hora da comparacao mais recente entre todas as associacoes."""
+    try:
+        atualizado_em = buscar_ultima_atualizacao()
+    except Exception as e:
+        logger.error("Erro ao buscar ultima atualizacao: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=503, detail=f"Erro ao acessar o banco local. Detalhes: {type(e).__name__}")
+
+    return {"atualizado_em": atualizado_em}
+
