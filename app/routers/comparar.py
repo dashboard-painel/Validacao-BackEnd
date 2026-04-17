@@ -24,8 +24,7 @@ def _camadas_atrasadas(
     """Retorna (camadas_atrasadas, camadas_sem_dados).
 
     camadas_atrasadas — tem dado mas é velho:
-    - GoldVendas / SilverSTGN_Dedup: data < D-1 (apenas D-2 ou mais antigo)
-    - API: "Pendente de envio" com data <= D-1 (ontem já conta)
+    - GoldVendas / SilverSTGN_Dedup / API: data < D-1 (apenas D-2 ou mais antigo)
 
     camadas_sem_dados — sem nenhum registro:
     - GoldVendas / SilverSTGN_Dedup: campo null
@@ -47,7 +46,7 @@ def _camadas_atrasadas(
     if coletor_novo and coletor_novo.startswith("Pendente de envio no dia "):
         data_api = coletor_novo.removeprefix("Pendente de envio no dia ").strip()
         try:
-            if date.fromisoformat(data_api[:10]) <= ontem:
+            if date.fromisoformat(data_api[:10]) < ontem:
                 atrasadas.append("API")
         except ValueError:
             pass
