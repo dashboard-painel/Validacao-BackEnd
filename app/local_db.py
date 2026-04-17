@@ -260,6 +260,15 @@ def salvar_comparacao(
         return comparacao_id
 
 
+def buscar_ultima_atualizacao() -> Optional[str]:
+    """Retorna a data/hora da comparação mais recente entre todas as associações."""
+    with get_local_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(executado_em)::text FROM comparacoes")
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
 def buscar_todos_consolidados() -> list[dict]:
     """Retorna todas as farmácias de todas as associações (dados da última rodada de cada uma).
 
@@ -282,12 +291,15 @@ def buscar_todos_consolidados() -> list[dict]:
                     rc.ultima_venda_SilverSTGN_Dedup::text,
                     rc.ultima_hora_venda_SilverSTGN_Dedup::text,
                     sf.coletor_novo,
-                    d.tipo_divergencia
+                    d.tipo_divergencia,
+                    c.executado_em::text AS atualizado_em
                 FROM resultados_consolidados rc
                 LEFT JOIN status_farmacias sf
                     ON sf.associacao = rc.associacao AND sf.cod_farmacia = rc.cod_farmacia
                 LEFT JOIN divergencias d
                     ON d.associacao = rc.associacao AND d.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN comparacoes c
+                    ON c.id = rc.comparacao_id
                 ORDER BY rc.associacao, rc.cod_farmacia
             """)
             return [dict(row) for row in cur.fetchall()]
@@ -314,12 +326,15 @@ def buscar_consolidado_por_associacao(associacao: str) -> list[dict]:
                     rc.ultima_venda_SilverSTGN_Dedup::text,
                     rc.ultima_hora_venda_SilverSTGN_Dedup::text,
                     sf.coletor_novo,
-                    d.tipo_divergencia
+                    d.tipo_divergencia,
+                    c.executado_em::text AS atualizado_em
                 FROM resultados_consolidados rc
                 LEFT JOIN status_farmacias sf
                     ON sf.associacao = rc.associacao AND sf.cod_farmacia = rc.cod_farmacia
                 LEFT JOIN divergencias d
                     ON d.associacao = rc.associacao AND d.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN comparacoes c
+                    ON c.id = rc.comparacao_id
                 WHERE rc.associacao = %s
                 ORDER BY rc.cod_farmacia
             """, (associacao,))

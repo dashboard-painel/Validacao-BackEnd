@@ -108,6 +108,10 @@ class ResultadoConsolidadoResponse(BaseModel):
         None,
         description="Camadas sem nenhum registro de venda: 'GoldVendas', 'SilverSTGN_Dedup'",
     )
+    atualizado_em: Optional[datetime] = Field(
+        None,
+        description="Data/hora em que esta comparação foi executada",
+    )
 
 
 class ComparacaoResponse(BaseModel):

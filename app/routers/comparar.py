@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.business_connect import buscar_status_farmacias
 from app.comparador import comparar_resultados
-from app.local_db import buscar_todos_consolidados, buscar_consolidado_por_associacao, salvar_status_farmacias
+from app.local_db import buscar_todos_consolidados, buscar_consolidado_por_associacao, buscar_ultima_atualizacao, salvar_status_farmacias
 from app.schemas import AssociacaoResumoResponse, ComparacaoRequest, ComparacaoResponse, DivergenciaResponse, FarmaciaStatusResponse, ResultadoConsolidadoResponse
 
 logger = logging.getLogger(__name__)
@@ -215,6 +215,7 @@ async def listar_todas_farmacias() -> list[ResultadoConsolidadoResponse]:
             ultima_hora_venda_SilverSTGN_Dedup=row.get("ultima_hora_venda_silverstgn_dedup"),
             coletor_novo=row.get("coletor_novo"),
             tipo_divergencia=row.get("tipo_divergencia"),
+            atualizado_em=row.get("atualizado_em"),
             **dict(zip(
                 ["camadas_atrasadas", "camadas_sem_dados"],
                 _camadas_atrasadas(row.get("ultima_venda_goldvendas"), row.get("ultima_venda_silverstgn_dedup"), row.get("coletor_novo")),
@@ -268,6 +269,7 @@ async def historico_consolidado(associacao: str) -> list[ResultadoConsolidadoRes
             ultima_hora_venda_SilverSTGN_Dedup=row.get("ultima_hora_venda_silverstgn_dedup"),
             coletor_novo=row.get("coletor_novo"),
             tipo_divergencia=row.get("tipo_divergencia"),
+            atualizado_em=row.get("atualizado_em"),
             **dict(zip(
                 ["camadas_atrasadas", "camadas_sem_dados"],
                 _camadas_atrasadas(row.get("ultima_venda_goldvendas"), row.get("ultima_venda_silverstgn_dedup"), row.get("coletor_novo")),
@@ -275,3 +277,16 @@ async def historico_consolidado(associacao: str) -> list[ResultadoConsolidadoRes
         )
         for row in rows
     ]
+
+
+@router.get("/ultima-atualizacao")
+def ultima_atualizacao() -> dict:
+    """Retorna a data/hora da comparacao mais recente entre todas as associacoes."""
+    try:
+        atualizado_em = buscar_ultima_atualizacao()
+    except Exception as e:
+        logger.error("Erro ao buscar ultima atualizacao: %s: %s", type(e).__name__, e)
+        raise HTTPException(status_code=503, detail=f"Erro ao acessar o banco local. Detalhes: {type(e).__name__}")
+
+    return {"atualizado_em": atualizado_em}
+
