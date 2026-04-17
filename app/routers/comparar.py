@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 from app.business_connect import buscar_status_farmacias
 from app.comparador import comparar_resultados
 from app.local_db import buscar_todos_consolidados, buscar_consolidado_por_associacao, buscar_ultima_atualizacao, salvar_status_farmacias
-from app.schemas import AssociacaoResumoResponse, ComparacaoRequest, ComparacaoResponse, DivergenciaResponse, FarmaciaStatusResponse, ResultadoConsolidadoResponse
+from app.schemas import ComparacaoRequest, ComparacaoResponse, DivergenciaResponse, FarmaciaStatusResponse, ResultadoConsolidadoResponse
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def _camadas_atrasadas(
 
 
 @router.get("/comparar", response_model=ComparacaoResponse)
-async def comparar(
+def comparar(
     associacao: str = Query(..., description="Código da associação para filtrar"),
 ) -> ComparacaoResponse:
     """Compara os resultados das duas queries do Redshift.
@@ -163,7 +163,7 @@ def _executar_comparacao(associacao: str) -> ComparacaoResponse:
 
 
 @router.post("/comparar", response_model=ComparacaoResponse)
-async def comparar_post(body: ComparacaoRequest) -> ComparacaoResponse:
+def comparar_post(body: ComparacaoRequest) -> ComparacaoResponse:
     """Compara os resultados das duas queries via body JSON.
 
     Mesma lógica do GET /comparar, mas recebe os parâmetros no corpo da requisição.
@@ -181,7 +181,7 @@ async def comparar_post(body: ComparacaoRequest) -> ComparacaoResponse:
 
 
 @router.get("/historico", response_model=list[ResultadoConsolidadoResponse])
-async def listar_todas_farmacias() -> list[ResultadoConsolidadoResponse]:
+def listar_todas_farmacias() -> list[ResultadoConsolidadoResponse]:
     """Retorna todas as farmácias de todas as associações (última comparação de cada uma).
 
     Ideal para a tela inicial do dashboard: carrega a tabela completa sem precisar
@@ -226,7 +226,7 @@ async def listar_todas_farmacias() -> list[ResultadoConsolidadoResponse]:
 
 
 @router.get("/historico/{associacao}", response_model=list[ResultadoConsolidadoResponse])
-async def historico_consolidado(associacao: str) -> list[ResultadoConsolidadoResponse]:
+def historico_consolidado(associacao: str) -> list[ResultadoConsolidadoResponse]:
     """Retorna os resultados consolidados da comparação mais recente de uma associação.
 
     Inclui dados de ambas as fontes (GoldVendas + SilverSTGN_Dedup), status do

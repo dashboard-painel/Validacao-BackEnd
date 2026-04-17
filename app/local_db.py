@@ -5,9 +5,6 @@ from typing import Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 def _sanitize_cnpj(cnpj: Optional[str]) -> Optional[str]:

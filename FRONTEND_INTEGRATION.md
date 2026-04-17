@@ -139,7 +139,7 @@ async function buscarDetalhes(associacao) {
 |-------|------|-----------|
 | `associacao` | string | Código da associação |
 | `cod_farmacia` | string | Código da farmácia |
-| `nome_farmacia` | string \| null | Razão social da farmácia |
+| `nome_farmacia` | string \| null | Nome fantasia da farmácia |
 | `cnpj` | string \| null | CNPJ somente com dígitos (sem `.` `-` `/`) |
 | `ultima_venda_GoldVendas` | string \| null | Última venda em `associacao.vendas` |
 | `ultima_hora_venda_GoldVendas` | string \| null | Hora da última venda em `associacao.vendas` |

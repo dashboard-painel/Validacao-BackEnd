@@ -144,7 +144,7 @@ curl "http://localhost:8000/historico/123"
 |-------|------|-----------|
 | `associacao` | string | Código da associação |
 | `cod_farmacia` | string | Código da farmácia |
-| `nome_farmacia` | string \| null | Razão social da farmácia |
+| `nome_farmacia` | string \| null | Nome fantasia da farmácia |
 | `cnpj` | string \| null | CNPJ sem formatação (14 dígitos) |
 | `ultima_venda_GoldVendas` | string \| null | Última venda em `associacao.vendas` |
 | `ultima_hora_venda_GoldVendas` | string \| null | Hora da última venda em `associacao.vendas` |
@@ -198,7 +198,7 @@ GET /historico
 ## Observações
 
 - O CNPJ é salvo **sem formatação** (somente os 14 dígitos) na tabela `resultados_consolidados`.
-- O nome da farmácia usa `raz_social` (razão social), não `nom_fantasia`.
+- O nome da farmácia usa `nom_fantasia` (nome fantasia).
 - Dados cadastrais (razão social/CNPJ) de farmácias silver-only são enriquecidos via `silver.cadfilia_staging_dedup` com fallback para `associacao.dimensao_cadastro_lojas`.
 - IDs de farmácias no banco local são **estáveis entre rodadas** — o UPSERT em `(associacao, cod_farmacia)` garante que o mesmo registro é reutilizado.
 - A tabela `comparacoes` é **append-only**: cada rodada gera uma nova linha de histórico.
