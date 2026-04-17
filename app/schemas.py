@@ -47,6 +47,14 @@ class DivergenciaResponse(BaseModel):
     ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Data da última venda em silver.cadcvend_staging_dedup (YYYY-MM-DD)")
     ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")
     tipo_divergencia: str = Field(..., description="Tipo: data_diferente, apenas_gold_vendas, apenas_silver_stgn_dedup")
+    camadas_atrasadas: Optional[list[str]] = Field(
+        None,
+        description="Camadas com ultima_venda mais antiga que D-1: 'GoldVendas', 'SilverSTGN_Dedup', 'API'",
+    )
+    camadas_sem_dados: Optional[list[str]] = Field(
+        None,
+        description="Camadas sem nenhum registro de venda: 'GoldVendas', 'SilverSTGN_Dedup'",
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -92,6 +100,14 @@ class ResultadoConsolidadoResponse(BaseModel):
     ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")
     coletor_novo: Optional[str] = Field(None, description="Status do coletor no Business Connect")
     tipo_divergencia: Optional[str] = Field(None, description="Tipo de divergência, null se não há divergência")
+    camadas_atrasadas: Optional[list[str]] = Field(
+        None,
+        description="Camadas com atraso: 'GoldVendas', 'SilverSTGN_Dedup', 'API'",
+    )
+    camadas_sem_dados: Optional[list[str]] = Field(
+        None,
+        description="Camadas sem nenhum registro de venda: 'GoldVendas', 'SilverSTGN_Dedup'",
+    )
 
 
 class ComparacaoResponse(BaseModel):

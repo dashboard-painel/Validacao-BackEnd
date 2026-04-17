@@ -121,6 +121,20 @@ GET http://localhost:8000/historico/80
 | `ultima_hora_venda_SilverSTGN_Dedup` | string \| null | Hora da última venda em `silver.cadcvend_staging_dedup` |
 | `coletor_novo` | string \| null | Status no Business Connect (ver tabela abaixo) |
 | `tipo_divergencia` | string \| null | Tipo de divergência — `null` se não há divergência |
+| `camadas_atrasadas` | string[] \| null | Camadas com atraso detectado — `null` se não há atraso |
+
+**Valores de `camadas_atrasadas`:**
+
+| Valor | Camada | Critério |
+|-------|--------|----------|
+| `"GoldVendas"` | `associacao.vendas` | `ultima_venda_GoldVendas` anterior a D-1 (D-2 ou mais antigo) |
+| `"SilverSTGN_Dedup"` | `silver.cadcvend_staging_dedup` | `ultima_venda_SilverSTGN_Dedup` anterior a D-1 (D-2 ou mais antigo) |
+| `"API"` | Business Connect | `"Pendente de envio"` com data igual ou anterior a D-1 (ontem já conta) |
+
+Exemplos:
+- `["GoldVendas", "API"]` — atraso em Gold e no coletor
+- `["SilverSTGN_Dedup"]` — atraso somente em Silver
+- `null` — sem atraso em nenhuma camada
 
 **Valores de `coletor_novo`:**
 

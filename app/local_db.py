@@ -44,37 +44,44 @@ def init_local_db():
 
                 CREATE TABLE IF NOT EXISTS resultados_gold_vendas (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
+                    associacao VARCHAR(100) NOT NULL,
+                    comparacao_id INTEGER REFERENCES comparacoes(id),
                     cod_farmacia VARCHAR(50) NOT NULL,
                     nome_farmacia VARCHAR(255),
                     cnpj VARCHAR(30),
                     ultima_venda DATE,
-                    ultima_hora_venda TIMESTAMP
+                    ultima_hora_venda TIMESTAMP,
+                    UNIQUE (associacao, cod_farmacia)
                 );
 
                 CREATE TABLE IF NOT EXISTS resultados_silver_stgn_dedup (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
+                    associacao VARCHAR(100) NOT NULL,
+                    comparacao_id INTEGER REFERENCES comparacoes(id),
                     cod_farmacia VARCHAR(50) NOT NULL,
                     ultima_venda DATE,
-                    ultima_hora_venda TIME
+                    ultima_hora_venda TIME,
+                    UNIQUE (associacao, cod_farmacia)
                 );
 
                 CREATE TABLE IF NOT EXISTS resultados_consolidados (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
+                    associacao VARCHAR(100) NOT NULL,
+                    comparacao_id INTEGER REFERENCES comparacoes(id),
                     cod_farmacia VARCHAR(50) NOT NULL,
                     nome_farmacia VARCHAR(255),
                     cnpj VARCHAR(30),
                     ultima_venda_GoldVendas DATE,
                     ultima_hora_venda_GoldVendas TIMESTAMP,
                     ultima_venda_SilverSTGN_Dedup DATE,
-                    ultima_hora_venda_SilverSTGN_Dedup TIME
+                    ultima_hora_venda_SilverSTGN_Dedup TIME,
+                    UNIQUE (associacao, cod_farmacia)
                 );
 
                 CREATE TABLE IF NOT EXISTS divergencias (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
+                    associacao VARCHAR(100) NOT NULL,
+                    comparacao_id INTEGER REFERENCES comparacoes(id),
                     cod_farmacia VARCHAR(50) NOT NULL,
                     nome_farmacia VARCHAR(255),
                     cnpj VARCHAR(30),
@@ -83,14 +90,17 @@ def init_local_db():
                     ultima_venda_SilverSTGN_Dedup DATE,
                     ultima_hora_venda_SilverSTGN_Dedup TIME,
                     tipo_divergencia VARCHAR(50) NOT NULL,
-                    coletor_novo TEXT
+                    coletor_novo TEXT,
+                    UNIQUE (associacao, cod_farmacia)
                 );
 
                 CREATE TABLE IF NOT EXISTS status_farmacias (
                     id SERIAL PRIMARY KEY,
-                    comparacao_id INTEGER REFERENCES comparacoes(id) ON DELETE CASCADE,
+                    associacao VARCHAR(100) NOT NULL,
+                    comparacao_id INTEGER REFERENCES comparacoes(id),
                     cod_farmacia VARCHAR(50) NOT NULL,
-                    coletor_novo TEXT NOT NULL
+                    coletor_novo TEXT NOT NULL,
+                    UNIQUE (associacao, cod_farmacia)
                 );
             """)
         conn.commit()
@@ -104,7 +114,10 @@ def salvar_comparacao(
 ) -> int:
     """Salva os resultados da comparação no PostgreSQL local.
 
-    Cada chamada gera um novo registro em comparacoes (log imutável).
+    comparacoes é append-only: cada rodada gera um novo ID (histórico de execuções).
+    As tabelas filhas usam UPSERT em (associacao, cod_farmacia), preservando os IDs
+    das farmácias entre rodadas. comparacao_id nas filhas aponta para a rodada mais recente.
+    Farmácias que desapareceram do novo resultado são removidas.
 
     Args:
         associacao: Código da associação comparada
@@ -113,35 +126,11 @@ def salvar_comparacao(
         divergencias: Lista de dicts com as divergências encontradas
 
     Returns:
-        int: ID da comparação criada na tabela comparacoes
+        int: ID da nova comparação criada em comparacoes
     """
     with get_local_connection() as conn:
         with conn.cursor() as cur:
-            # Remove execuções anteriores da mesma associação (delete em cascata manual)
-            cur.execute("""
-                DELETE FROM resultados_gold_vendas
-                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
-            """, (associacao,))
-            cur.execute("""
-                DELETE FROM resultados_silver_stgn_dedup
-                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
-            """, (associacao,))
-            cur.execute("""
-                DELETE FROM resultados_consolidados
-                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
-            """, (associacao,))
-            cur.execute("""
-                DELETE FROM divergencias
-                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
-            """, (associacao,))
-            cur.execute("""
-                DELETE FROM status_farmacias
-                WHERE comparacao_id IN (SELECT id FROM comparacoes WHERE associacao = %s)
-            """, (associacao,))
-            cur.execute("""
-                DELETE FROM comparacoes WHERE associacao = %s
-            """, (associacao,))
-
+            # Nova linha a cada rodada — histórico de execuções
             cur.execute("""
                 INSERT INTO comparacoes (associacao, total_gold_vendas, total_silver_stgn_dedup, total_divergencias)
                 VALUES (%s, %s, %s, %s)
@@ -149,26 +138,61 @@ def salvar_comparacao(
             """, (associacao, len(resultados_gold_vendas), len(resultados_silver_stgn_dedup), len(divergencias)))
             comparacao_id = cur.fetchone()[0]
 
+            # --- resultados_gold_vendas ---
+            novos_gold = {str(r["cod_farmacia"]).strip() for r in resultados_gold_vendas}
+            if novos_gold:
+                cur.execute(
+                    "DELETE FROM resultados_gold_vendas WHERE associacao = %s AND cod_farmacia <> ALL(%s)",
+                    (associacao, list(novos_gold)),
+                )
+            else:
+                cur.execute("DELETE FROM resultados_gold_vendas WHERE associacao = %s", (associacao,))
             for r in resultados_gold_vendas:
                 cur.execute("""
-                    INSERT INTO resultados_gold_vendas (comparacao_id, cod_farmacia, nome_farmacia, cnpj, ultima_venda, ultima_hora_venda)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                """, (comparacao_id, r["cod_farmacia"], r.get("nome_farmacia"), r.get("cnpj"), r.get("ultima_venda"), r.get("ultima_hora_venda")))
+                    INSERT INTO resultados_gold_vendas
+                        (associacao, comparacao_id, cod_farmacia, nome_farmacia, cnpj, ultima_venda, ultima_hora_venda)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (associacao, cod_farmacia) DO UPDATE
+                        SET comparacao_id     = EXCLUDED.comparacao_id,
+                            nome_farmacia     = EXCLUDED.nome_farmacia,
+                            cnpj              = EXCLUDED.cnpj,
+                            ultima_venda      = EXCLUDED.ultima_venda,
+                            ultima_hora_venda = EXCLUDED.ultima_hora_venda
+                """, (associacao, comparacao_id, r["cod_farmacia"], r.get("nome_farmacia"), r.get("cnpj"), r.get("ultima_venda"), r.get("ultima_hora_venda")))
 
+            # --- resultados_silver_stgn_dedup ---
+            novos_silver = {str(r["cod_farmacia"]).strip() for r in resultados_silver_stgn_dedup}
+            if novos_silver:
+                cur.execute(
+                    "DELETE FROM resultados_silver_stgn_dedup WHERE associacao = %s AND cod_farmacia <> ALL(%s)",
+                    (associacao, list(novos_silver)),
+                )
+            else:
+                cur.execute("DELETE FROM resultados_silver_stgn_dedup WHERE associacao = %s", (associacao,))
             for r in resultados_silver_stgn_dedup:
                 cur.execute("""
-                    INSERT INTO resultados_silver_stgn_dedup (comparacao_id, cod_farmacia, ultima_venda, ultima_hora_venda)
-                    VALUES (%s, %s, %s, %s)
-                """, (comparacao_id, r["cod_farmacia"], r.get("ultima_venda"), r.get("ultima_hora_venda")))
+                    INSERT INTO resultados_silver_stgn_dedup
+                        (associacao, comparacao_id, cod_farmacia, ultima_venda, ultima_hora_venda)
+                    VALUES (%s, %s, %s, %s, %s)
+                    ON CONFLICT (associacao, cod_farmacia) DO UPDATE
+                        SET comparacao_id     = EXCLUDED.comparacao_id,
+                            ultima_venda      = EXCLUDED.ultima_venda,
+                            ultima_hora_venda = EXCLUDED.ultima_hora_venda
+                """, (associacao, comparacao_id, r["cod_farmacia"], r.get("ultima_venda"), r.get("ultima_hora_venda")))
 
-            # Consolida GoldVendas e SilverSTGN_Dedup (FULL OUTER JOIN por cod_farmacia)
+            # --- resultados_consolidados ---
             gold_by_cod = {str(r["cod_farmacia"]).strip(): r for r in resultados_gold_vendas}
             silver_by_cod = {str(r["cod_farmacia"]).strip(): r for r in resultados_silver_stgn_dedup}
             todas_farmacias = set(gold_by_cod.keys()) | set(silver_by_cod.keys())
-
-            # Lookup de nome/cnpj das divergências (já enriquecidas pelo cadfilia no comparador)
             div_lookup = {str(d["cod_farmacia"]).strip(): d for d in divergencias}
 
+            if todas_farmacias:
+                cur.execute(
+                    "DELETE FROM resultados_consolidados WHERE associacao = %s AND cod_farmacia <> ALL(%s)",
+                    (associacao, list(todas_farmacias)),
+                )
+            else:
+                cur.execute("DELETE FROM resultados_consolidados WHERE associacao = %s", (associacao,))
             for cod in todas_farmacias:
                 r_gold = gold_by_cod.get(cod)
                 r_silver = silver_by_cod.get(cod)
@@ -180,26 +204,53 @@ def salvar_comparacao(
                     cnpj = cnpj or div.get("cnpj")
                 cur.execute("""
                     INSERT INTO resultados_consolidados
-                        (comparacao_id, cod_farmacia, nome_farmacia, cnpj,
+                        (associacao, comparacao_id, cod_farmacia, nome_farmacia, cnpj,
                          ultima_venda_GoldVendas, ultima_hora_venda_GoldVendas,
                          ultima_venda_SilverSTGN_Dedup, ultima_hora_venda_SilverSTGN_Dedup)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (associacao, cod_farmacia) DO UPDATE
+                        SET comparacao_id                      = EXCLUDED.comparacao_id,
+                            nome_farmacia                      = EXCLUDED.nome_farmacia,
+                            cnpj                               = EXCLUDED.cnpj,
+                            ultima_venda_GoldVendas            = EXCLUDED.ultima_venda_GoldVendas,
+                            ultima_hora_venda_GoldVendas       = EXCLUDED.ultima_hora_venda_GoldVendas,
+                            ultima_venda_SilverSTGN_Dedup      = EXCLUDED.ultima_venda_SilverSTGN_Dedup,
+                            ultima_hora_venda_SilverSTGN_Dedup = EXCLUDED.ultima_hora_venda_SilverSTGN_Dedup
                 """, (
-                    comparacao_id, cod, nome, _sanitize_cnpj(cnpj),
+                    associacao, comparacao_id, cod, nome, _sanitize_cnpj(cnpj),
                     r_gold.get("ultima_venda") if r_gold else None,
                     r_gold.get("ultima_hora_venda") if r_gold else None,
                     r_silver.get("ultima_venda") if r_silver else None,
                     r_silver.get("ultima_hora_venda") if r_silver else None,
                 ))
 
+            # --- divergencias ---
+            novos_divs = {str(d["cod_farmacia"]).strip() for d in divergencias}
+            if novos_divs:
+                cur.execute(
+                    "DELETE FROM divergencias WHERE associacao = %s AND cod_farmacia <> ALL(%s)",
+                    (associacao, list(novos_divs)),
+                )
+            else:
+                cur.execute("DELETE FROM divergencias WHERE associacao = %s", (associacao,))
             for d in divergencias:
                 cur.execute("""
-                    INSERT INTO divergencias (comparacao_id, cod_farmacia, nome_farmacia, cnpj,
-                        ultima_venda_GoldVendas, ultima_hora_venda_GoldVendas,
-                        ultima_venda_SilverSTGN_Dedup, ultima_hora_venda_SilverSTGN_Dedup, tipo_divergencia)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO divergencias
+                        (associacao, comparacao_id, cod_farmacia, nome_farmacia, cnpj,
+                         ultima_venda_GoldVendas, ultima_hora_venda_GoldVendas,
+                         ultima_venda_SilverSTGN_Dedup, ultima_hora_venda_SilverSTGN_Dedup, tipo_divergencia)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (associacao, cod_farmacia) DO UPDATE
+                        SET comparacao_id                      = EXCLUDED.comparacao_id,
+                            nome_farmacia                      = EXCLUDED.nome_farmacia,
+                            cnpj                               = EXCLUDED.cnpj,
+                            ultima_venda_GoldVendas            = EXCLUDED.ultima_venda_GoldVendas,
+                            ultima_hora_venda_GoldVendas       = EXCLUDED.ultima_hora_venda_GoldVendas,
+                            ultima_venda_SilverSTGN_Dedup      = EXCLUDED.ultima_venda_SilverSTGN_Dedup,
+                            ultima_hora_venda_SilverSTGN_Dedup = EXCLUDED.ultima_hora_venda_SilverSTGN_Dedup,
+                            tipo_divergencia                   = EXCLUDED.tipo_divergencia
                 """, (
-                    comparacao_id, d["cod_farmacia"], d.get("nome_farmacia"), d.get("cnpj"),
+                    associacao, comparacao_id, d["cod_farmacia"], d.get("nome_farmacia"), d.get("cnpj"),
                     d.get("ultima_venda_GoldVendas"), d.get("ultima_hora_venda_GoldVendas"),
                     d.get("ultima_venda_SilverSTGN_Dedup"), d.get("ultima_hora_venda_SilverSTGN_Dedup"),
                     d["tipo_divergencia"],
@@ -210,7 +261,10 @@ def salvar_comparacao(
 
 
 def buscar_todos_consolidados() -> list[dict]:
-    """Retorna todas as farmácias de todas as associações (última comparação de cada uma).
+    """Retorna todas as farmácias de todas as associações (dados da última rodada de cada uma).
+
+    Como as tabelas filhas têm UNIQUE (associacao, cod_farmacia), cada farmácia tem
+    exatamente uma linha, sempre atualizada com os dados mais recentes.
 
     Returns:
         Lista com todas as farmácias, incluindo associacao, coletor_novo e tipo_divergencia
@@ -219,7 +273,7 @@ def buscar_todos_consolidados() -> list[dict]:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT
-                    c.associacao,
+                    rc.associacao,
                     rc.cod_farmacia,
                     rc.nome_farmacia,
                     rc.cnpj,
@@ -230,31 +284,17 @@ def buscar_todos_consolidados() -> list[dict]:
                     sf.coletor_novo,
                     d.tipo_divergencia
                 FROM resultados_consolidados rc
-                JOIN comparacoes c ON c.id = rc.comparacao_id
-                LEFT JOIN (
-                    SELECT DISTINCT ON (comparacao_id, cod_farmacia) comparacao_id, cod_farmacia, coletor_novo
-                    FROM status_farmacias
-                    ORDER BY comparacao_id, cod_farmacia, id DESC
-                ) sf ON sf.comparacao_id = rc.comparacao_id AND sf.cod_farmacia = rc.cod_farmacia
-                LEFT JOIN (
-                    SELECT DISTINCT ON (comparacao_id, cod_farmacia) comparacao_id, cod_farmacia, tipo_divergencia
-                    FROM divergencias
-                    ORDER BY comparacao_id, cod_farmacia, id DESC
-                ) d ON d.comparacao_id = rc.comparacao_id AND d.cod_farmacia = rc.cod_farmacia
-                WHERE c.id IN (
-                    SELECT DISTINCT ON (associacao) id
-                    FROM comparacoes
-                    ORDER BY associacao, executado_em DESC
-                )
-                ORDER BY c.associacao, rc.cod_farmacia
+                LEFT JOIN status_farmacias sf
+                    ON sf.associacao = rc.associacao AND sf.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN divergencias d
+                    ON d.associacao = rc.associacao AND d.cod_farmacia = rc.cod_farmacia
+                ORDER BY rc.associacao, rc.cod_farmacia
             """)
             return [dict(row) for row in cur.fetchall()]
 
 
 def buscar_consolidado_por_associacao(associacao: str) -> list[dict]:
-    """Busca os resultados consolidados da comparação mais recente de uma associação.
-
-    Faz JOIN com status_farmacias (coletor_novo) e divergencias (tipo_divergencia).
+    """Busca os resultados consolidados da última rodada de uma associação.
 
     Args:
         associacao: Código da associação
@@ -276,30 +316,17 @@ def buscar_consolidado_por_associacao(associacao: str) -> list[dict]:
                     sf.coletor_novo,
                     d.tipo_divergencia
                 FROM resultados_consolidados rc
-                JOIN comparacoes c ON c.id = rc.comparacao_id
-                LEFT JOIN (
-                    SELECT DISTINCT ON (comparacao_id, cod_farmacia) comparacao_id, cod_farmacia, coletor_novo
-                    FROM status_farmacias
-                    ORDER BY comparacao_id, cod_farmacia, id DESC
-                ) sf ON sf.comparacao_id = rc.comparacao_id AND sf.cod_farmacia = rc.cod_farmacia
-                LEFT JOIN (
-                    SELECT DISTINCT ON (comparacao_id, cod_farmacia) comparacao_id, cod_farmacia, tipo_divergencia
-                    FROM divergencias
-                    ORDER BY comparacao_id, cod_farmacia, id DESC
-                ) d ON d.comparacao_id = rc.comparacao_id AND d.cod_farmacia = rc.cod_farmacia
-                WHERE c.associacao = %s
-                  AND c.id = (
-                      SELECT id FROM comparacoes
-                      WHERE associacao = %s
-                      ORDER BY executado_em DESC
-                      LIMIT 1
-                  )
+                LEFT JOIN status_farmacias sf
+                    ON sf.associacao = rc.associacao AND sf.cod_farmacia = rc.cod_farmacia
+                LEFT JOIN divergencias d
+                    ON d.associacao = rc.associacao AND d.cod_farmacia = rc.cod_farmacia
+                WHERE rc.associacao = %s
                 ORDER BY rc.cod_farmacia
-            """, (associacao, associacao))
+            """, (associacao,))
             return [dict(row) for row in cur.fetchall()]
 
 
-def salvar_status_farmacias(comparacao_id: int, status_farmacias: dict[str, str]) -> None:
+def salvar_status_farmacias(comparacao_id: int, associacao: str, status_farmacias: dict[str, str]) -> None:
     """Persiste o status de migração das farmácias no PostgreSQL local."""
     if not status_farmacias:
         return
@@ -308,14 +335,17 @@ def salvar_status_farmacias(comparacao_id: int, status_farmacias: dict[str, str]
         with conn.cursor() as cur:
             for cod_farmacia, coletor_novo in status_farmacias.items():
                 cur.execute("""
-                    INSERT INTO status_farmacias (comparacao_id, cod_farmacia, coletor_novo)
-                    VALUES (%s, %s, %s)
-                """, (comparacao_id, cod_farmacia, coletor_novo))
+                    INSERT INTO status_farmacias (associacao, comparacao_id, cod_farmacia, coletor_novo)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (associacao, cod_farmacia) DO UPDATE
+                        SET comparacao_id = EXCLUDED.comparacao_id,
+                            coletor_novo  = EXCLUDED.coletor_novo
+                """, (associacao, comparacao_id, cod_farmacia, coletor_novo))
 
                 cur.execute("""
                     UPDATE divergencias
                     SET coletor_novo = %s
-                    WHERE comparacao_id = %s AND cod_farmacia = %s
-                """, (coletor_novo, comparacao_id, cod_farmacia))
+                    WHERE associacao = %s AND cod_farmacia = %s
+                """, (coletor_novo, associacao, cod_farmacia))
 
         conn.commit()
