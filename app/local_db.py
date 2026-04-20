@@ -5,9 +5,6 @@ from typing import Optional
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from dotenv import load_dotenv
-
-load_dotenv()
 
 
 def _sanitize_cnpj(cnpj: Optional[str]) -> Optional[str]:
@@ -42,6 +39,7 @@ def init_local_db():
                     total_divergencias INTEGER NOT NULL
                 );
 
+                -- Dados brutos de cada fonte (mantidos para auditoria/debug)
                 CREATE TABLE IF NOT EXISTS resultados_gold_vendas (
                     id SERIAL PRIMARY KEY,
                     associacao VARCHAR(100) NOT NULL,
@@ -64,7 +62,9 @@ def init_local_db():
                     UNIQUE (associacao, cod_farmacia)
                 );
 
-                CREATE TABLE IF NOT EXISTS resultados_consolidados (
+                -- Estado atual consolidado de cada farmácia: dados de ambas as fontes,
+                -- tipo de divergência e status dos coletores (Business Connect + Coletor BI).
+                CREATE TABLE IF NOT EXISTS farmacias (
                     id SERIAL PRIMARY KEY,
                     associacao VARCHAR(100) NOT NULL,
                     comparacao_id INTEGER REFERENCES comparacoes(id),
@@ -75,31 +75,10 @@ def init_local_db():
                     ultima_hora_venda_GoldVendas TIMESTAMP,
                     ultima_venda_SilverSTGN_Dedup DATE,
                     ultima_hora_venda_SilverSTGN_Dedup TIME,
-                    UNIQUE (associacao, cod_farmacia)
-                );
-
-                CREATE TABLE IF NOT EXISTS divergencias (
-                    id SERIAL PRIMARY KEY,
-                    associacao VARCHAR(100) NOT NULL,
-                    comparacao_id INTEGER REFERENCES comparacoes(id),
-                    cod_farmacia VARCHAR(50) NOT NULL,
-                    nome_farmacia VARCHAR(255),
-                    cnpj VARCHAR(30),
-                    ultima_venda_GoldVendas DATE,
-                    ultima_hora_venda_GoldVendas TIMESTAMP,
-                    ultima_venda_SilverSTGN_Dedup DATE,
-                    ultima_hora_venda_SilverSTGN_Dedup TIME,
-                    tipo_divergencia VARCHAR(50) NOT NULL,
+                    tipo_divergencia VARCHAR(50),
                     coletor_novo TEXT,
-                    UNIQUE (associacao, cod_farmacia)
-                );
-
-                CREATE TABLE IF NOT EXISTS status_farmacias (
-                    id SERIAL PRIMARY KEY,
-                    associacao VARCHAR(100) NOT NULL,
-                    comparacao_id INTEGER REFERENCES comparacoes(id),
-                    cod_farmacia VARCHAR(50) NOT NULL,
-                    coletor_novo TEXT NOT NULL,
+                    coletor_bi_ultima_data DATE,
+                    coletor_bi_ultima_hora TIME,
                     UNIQUE (associacao, cod_farmacia)
                 );
             """)
@@ -180,7 +159,7 @@ def salvar_comparacao(
                             ultima_hora_venda = EXCLUDED.ultima_hora_venda
                 """, (associacao, comparacao_id, r["cod_farmacia"], r.get("ultima_venda"), r.get("ultima_hora_venda")))
 
-            # --- resultados_consolidados ---
+            # --- farmacias (consolidado + divergências) ---
             gold_by_cod = {str(r["cod_farmacia"]).strip(): r for r in resultados_gold_vendas}
             silver_by_cod = {str(r["cod_farmacia"]).strip(): r for r in resultados_silver_stgn_dedup}
             todas_farmacias = set(gold_by_cod.keys()) | set(silver_by_cod.keys())
@@ -188,58 +167,25 @@ def salvar_comparacao(
 
             if todas_farmacias:
                 cur.execute(
-                    "DELETE FROM resultados_consolidados WHERE associacao = %s AND cod_farmacia <> ALL(%s)",
+                    "DELETE FROM farmacias WHERE associacao = %s AND cod_farmacia <> ALL(%s)",
                     (associacao, list(todas_farmacias)),
                 )
             else:
-                cur.execute("DELETE FROM resultados_consolidados WHERE associacao = %s", (associacao,))
+                cur.execute("DELETE FROM farmacias WHERE associacao = %s", (associacao,))
+
             for cod in todas_farmacias:
                 r_gold = gold_by_cod.get(cod)
                 r_silver = silver_by_cod.get(cod)
-                nome = r_gold.get("nome_farmacia") if r_gold else None
-                cnpj = r_gold.get("cnpj") if r_gold else None
-                if not nome or not cnpj:
-                    div = div_lookup.get(cod, {})
-                    nome = nome or div.get("nome_farmacia")
-                    cnpj = cnpj or div.get("cnpj")
+                div = div_lookup.get(cod, {})
+                nome = (r_gold.get("nome_farmacia") if r_gold else None) or div.get("nome_farmacia")
+                cnpj = (r_gold.get("cnpj") if r_gold else None) or div.get("cnpj")
                 cur.execute("""
-                    INSERT INTO resultados_consolidados
+                    INSERT INTO farmacias
                         (associacao, comparacao_id, cod_farmacia, nome_farmacia, cnpj,
                          ultima_venda_GoldVendas, ultima_hora_venda_GoldVendas,
-                         ultima_venda_SilverSTGN_Dedup, ultima_hora_venda_SilverSTGN_Dedup)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (associacao, cod_farmacia) DO UPDATE
-                        SET comparacao_id                      = EXCLUDED.comparacao_id,
-                            nome_farmacia                      = EXCLUDED.nome_farmacia,
-                            cnpj                               = EXCLUDED.cnpj,
-                            ultima_venda_GoldVendas            = EXCLUDED.ultima_venda_GoldVendas,
-                            ultima_hora_venda_GoldVendas       = EXCLUDED.ultima_hora_venda_GoldVendas,
-                            ultima_venda_SilverSTGN_Dedup      = EXCLUDED.ultima_venda_SilverSTGN_Dedup,
-                            ultima_hora_venda_SilverSTGN_Dedup = EXCLUDED.ultima_hora_venda_SilverSTGN_Dedup
-                """, (
-                    associacao, comparacao_id, cod, nome, _sanitize_cnpj(cnpj),
-                    r_gold.get("ultima_venda") if r_gold else None,
-                    r_gold.get("ultima_hora_venda") if r_gold else None,
-                    r_silver.get("ultima_venda") if r_silver else None,
-                    r_silver.get("ultima_hora_venda") if r_silver else None,
-                ))
-
-            # --- divergencias ---
-            novos_divs = {str(d["cod_farmacia"]).strip() for d in divergencias}
-            if novos_divs:
-                cur.execute(
-                    "DELETE FROM divergencias WHERE associacao = %s AND cod_farmacia <> ALL(%s)",
-                    (associacao, list(novos_divs)),
-                )
-            else:
-                cur.execute("DELETE FROM divergencias WHERE associacao = %s", (associacao,))
-            for d in divergencias:
-                cur.execute("""
-                    INSERT INTO divergencias
-                        (associacao, comparacao_id, cod_farmacia, nome_farmacia, cnpj,
-                         ultima_venda_GoldVendas, ultima_hora_venda_GoldVendas,
-                         ultima_venda_SilverSTGN_Dedup, ultima_hora_venda_SilverSTGN_Dedup, tipo_divergencia)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         ultima_venda_SilverSTGN_Dedup, ultima_hora_venda_SilverSTGN_Dedup,
+                         tipo_divergencia, coletor_novo, coletor_bi_ultima_data, coletor_bi_ultima_hora)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL)
                     ON CONFLICT (associacao, cod_farmacia) DO UPDATE
                         SET comparacao_id                      = EXCLUDED.comparacao_id,
                             nome_farmacia                      = EXCLUDED.nome_farmacia,
@@ -248,12 +194,17 @@ def salvar_comparacao(
                             ultima_hora_venda_GoldVendas       = EXCLUDED.ultima_hora_venda_GoldVendas,
                             ultima_venda_SilverSTGN_Dedup      = EXCLUDED.ultima_venda_SilverSTGN_Dedup,
                             ultima_hora_venda_SilverSTGN_Dedup = EXCLUDED.ultima_hora_venda_SilverSTGN_Dedup,
-                            tipo_divergencia                   = EXCLUDED.tipo_divergencia
+                            tipo_divergencia                   = EXCLUDED.tipo_divergencia,
+                            coletor_novo                       = NULL,
+                            coletor_bi_ultima_data             = NULL,
+                            coletor_bi_ultima_hora             = NULL
                 """, (
-                    associacao, comparacao_id, d["cod_farmacia"], d.get("nome_farmacia"), d.get("cnpj"),
-                    d.get("ultima_venda_GoldVendas"), d.get("ultima_hora_venda_GoldVendas"),
-                    d.get("ultima_venda_SilverSTGN_Dedup"), d.get("ultima_hora_venda_SilverSTGN_Dedup"),
-                    d["tipo_divergencia"],
+                    associacao, comparacao_id, cod, nome, _sanitize_cnpj(cnpj),
+                    r_gold.get("ultima_venda") if r_gold else None,
+                    r_gold.get("ultima_hora_venda") if r_gold else None,
+                    r_silver.get("ultima_venda") if r_silver else None,
+                    r_silver.get("ultima_hora_venda") if r_silver else None,
+                    div.get("tipo_divergencia"),
                 ))
 
         conn.commit()
@@ -270,97 +221,85 @@ def buscar_ultima_atualizacao() -> Optional[str]:
 
 
 def buscar_todos_consolidados() -> list[dict]:
-    """Retorna todas as farmácias de todas as associações (dados da última rodada de cada uma).
-
-    Como as tabelas filhas têm UNIQUE (associacao, cod_farmacia), cada farmácia tem
-    exatamente uma linha, sempre atualizada com os dados mais recentes.
-
-    Returns:
-        Lista com todas as farmácias, incluindo associacao, coletor_novo e tipo_divergencia
-    """
+    """Retorna todas as farmácias de todas as associações (dados da última rodada de cada uma)."""
     with get_local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT
-                    rc.associacao,
-                    rc.cod_farmacia,
-                    rc.nome_farmacia,
-                    rc.cnpj,
-                    rc.ultima_venda_GoldVendas::text,
-                    rc.ultima_hora_venda_GoldVendas::text,
-                    rc.ultima_venda_SilverSTGN_Dedup::text,
-                    rc.ultima_hora_venda_SilverSTGN_Dedup::text,
-                    sf.coletor_novo,
-                    d.tipo_divergencia,
+                    f.associacao,
+                    f.cod_farmacia,
+                    f.nome_farmacia,
+                    f.cnpj,
+                    f.ultima_venda_GoldVendas::text,
+                    f.ultima_hora_venda_GoldVendas::text,
+                    f.ultima_venda_SilverSTGN_Dedup::text,
+                    f.ultima_hora_venda_SilverSTGN_Dedup::text,
+                    f.tipo_divergencia,
+                    f.coletor_novo,
+                    f.coletor_bi_ultima_data::text,
+                    f.coletor_bi_ultima_hora::text,
                     c.executado_em::text AS atualizado_em
-                FROM resultados_consolidados rc
-                LEFT JOIN status_farmacias sf
-                    ON sf.associacao = rc.associacao AND sf.cod_farmacia = rc.cod_farmacia
-                LEFT JOIN divergencias d
-                    ON d.associacao = rc.associacao AND d.cod_farmacia = rc.cod_farmacia
-                LEFT JOIN comparacoes c
-                    ON c.id = rc.comparacao_id
-                ORDER BY rc.associacao, rc.cod_farmacia
+                FROM farmacias f
+                LEFT JOIN comparacoes c ON c.id = f.comparacao_id
+                ORDER BY f.associacao, f.cod_farmacia
             """)
             return [dict(row) for row in cur.fetchall()]
 
 
-def buscar_consolidado_por_associacao(associacao: str) -> list[dict]:
-    """Busca os resultados consolidados da última rodada de uma associação.
-
-    Args:
-        associacao: Código da associação
-
-    Returns:
-        Lista de registros com dados de ambas as fontes, status do coletor e tipo de divergência
-    """
+def buscar_historico_por_associacao(associacao: str) -> list[dict]:
+    """Busca o estado atual de todas as farmácias de uma associação."""
     with get_local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT
-                    rc.cod_farmacia,
-                    rc.nome_farmacia,
-                    rc.cnpj,
-                    rc.ultima_venda_GoldVendas::text,
-                    rc.ultima_hora_venda_GoldVendas::text,
-                    rc.ultima_venda_SilverSTGN_Dedup::text,
-                    rc.ultima_hora_venda_SilverSTGN_Dedup::text,
-                    sf.coletor_novo,
-                    d.tipo_divergencia,
+                    f.associacao,
+                    f.cod_farmacia,
+                    f.nome_farmacia,
+                    f.cnpj,
+                    f.ultima_venda_GoldVendas::text,
+                    f.ultima_hora_venda_GoldVendas::text,
+                    f.ultima_venda_SilverSTGN_Dedup::text,
+                    f.ultima_hora_venda_SilverSTGN_Dedup::text,
+                    f.tipo_divergencia,
+                    f.coletor_novo,
+                    f.coletor_bi_ultima_data::text,
+                    f.coletor_bi_ultima_hora::text,
                     c.executado_em::text AS atualizado_em
-                FROM resultados_consolidados rc
-                LEFT JOIN status_farmacias sf
-                    ON sf.associacao = rc.associacao AND sf.cod_farmacia = rc.cod_farmacia
-                LEFT JOIN divergencias d
-                    ON d.associacao = rc.associacao AND d.cod_farmacia = rc.cod_farmacia
-                LEFT JOIN comparacoes c
-                    ON c.id = rc.comparacao_id
-                WHERE rc.associacao = %s
-                ORDER BY rc.cod_farmacia
+                FROM farmacias f
+                LEFT JOIN comparacoes c ON c.id = f.comparacao_id
+                WHERE f.associacao = %s
+                ORDER BY f.cod_farmacia
             """, (associacao,))
             return [dict(row) for row in cur.fetchall()]
 
 
-def salvar_status_farmacias(comparacao_id: int, associacao: str, status_farmacias: dict[str, str]) -> None:
-    """Persiste o status de migração das farmácias no PostgreSQL local."""
+def salvar_status_farmacias(
+    comparacao_id: int,
+    associacao: str,
+    status_farmacias: dict[str, str],
+    coletor_bi: dict[str, str] | None = None,
+) -> None:
+    """Atualiza o status dos coletores (Business Connect + Coletor BI) em farmacias."""
     if not status_farmacias:
         return
+
+    coletor_bi = coletor_bi or {}
 
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             for cod_farmacia, coletor_novo in status_farmacias.items():
+                dados_bi = coletor_bi.get(cod_farmacia) or {}
                 cur.execute("""
-                    INSERT INTO status_farmacias (associacao, comparacao_id, cod_farmacia, coletor_novo)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT (associacao, cod_farmacia) DO UPDATE
-                        SET comparacao_id = EXCLUDED.comparacao_id,
-                            coletor_novo  = EXCLUDED.coletor_novo
-                """, (associacao, comparacao_id, cod_farmacia, coletor_novo))
-
-                cur.execute("""
-                    UPDATE divergencias
-                    SET coletor_novo = %s
+                    UPDATE farmacias
+                    SET coletor_novo           = %s,
+                        coletor_bi_ultima_data = %s,
+                        coletor_bi_ultima_hora = %s
                     WHERE associacao = %s AND cod_farmacia = %s
-                """, (coletor_novo, associacao, cod_farmacia))
-
+                """, (
+                    coletor_novo,
+                    dados_bi.get("ultima_data"),
+                    dados_bi.get("ultima_hora"),
+                    associacao,
+                    cod_farmacia,
+                ))
         conn.commit()

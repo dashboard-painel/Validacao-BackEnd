@@ -27,6 +27,11 @@ API em Python (FastAPI) para comparação da última venda registrada por farmá
    cp .env.example .env
    # Edite .env com suas credenciais
    ```
+5. Na primeira execução (ou após alterar o schema), o banco local é criado automaticamente ao iniciar a API. Se precisar recriar do zero, rode no psql:
+   ```sql
+   DROP TABLE IF EXISTS status_farmacias, divergencias, resultados_consolidados,
+     resultados_silver_stgn_dedup, resultados_gold_vendas, comparacoes CASCADE;
+   ```
 
 ## Executando
 
@@ -78,7 +83,9 @@ curl "http://localhost:8000/comparar?associacao=123"
       "ultima_hora_venda_GoldVendas": "14:30:00",
       "ultima_venda_SilverSTGN_Dedup": "2024-03-14",
       "ultima_hora_venda_SilverSTGN_Dedup": "09:00:00",
-      "tipo_divergencia": "data_diferente"
+      "tipo_divergencia": "data_diferente",
+      "camadas_atrasadas": ["GoldVendas"],
+      "camadas_sem_dados": null
     }
   ],
   "status_farmacias": [
@@ -94,6 +101,9 @@ curl "http://localhost:8000/comparar?associacao=123"
 - `data_diferente` — Farmácia presente em ambas as fontes mas com datas distintas
 - `apenas_gold_vendas` — Farmácia presente somente em `associacao.vendas`
 - `apenas_silver_stgn_dedup` — Farmácia presente somente em `silver.cadcvend_staging_dedup`
+
+**Regra de atraso (`camadas_atrasadas`):**  
+Uma camada é considerada atrasada se a última venda for **anterior a D-1** (D-2 ou mais antigo) — mesmo critério para GoldVendas, SilverSTGN_Dedup e API.
 
 **Erros:**
 
@@ -114,7 +124,7 @@ curl -X POST "http://localhost:8000/comparar" \
 
 ### `GET /historico` — Tabela completa
 
-Retorna todas as farmácias de todas as associações (última comparação de cada uma), com `coletor_novo` e `tipo_divergencia` embutidos. Ideal para carregar o dashboard sem parâmetros.
+Retorna todas as farmácias de todas as associações (última comparação de cada uma), com `coletor_novo`, `tipo_divergencia`, `camadas_atrasadas`, `camadas_sem_dados` e `atualizado_em` embutidos. Ideal para carregar o dashboard sem parâmetros.
 
 ```bash
 curl "http://localhost:8000/historico"
@@ -134,7 +144,7 @@ curl "http://localhost:8000/historico/123"
 |-------|------|-----------|
 | `associacao` | string | Código da associação |
 | `cod_farmacia` | string | Código da farmácia |
-| `nome_farmacia` | string \| null | Nome da farmácia |
+| `nome_farmacia` | string \| null | Nome fantasia da farmácia |
 | `cnpj` | string \| null | CNPJ sem formatação (14 dígitos) |
 | `ultima_venda_GoldVendas` | string \| null | Última venda em `associacao.vendas` |
 | `ultima_hora_venda_GoldVendas` | string \| null | Hora da última venda em `associacao.vendas` |
@@ -142,6 +152,9 @@ curl "http://localhost:8000/historico/123"
 | `ultima_hora_venda_SilverSTGN_Dedup` | string \| null | Hora da última venda em `silver.cadcvend_staging_dedup` |
 | `coletor_novo` | string \| null | Status no Business Connect |
 | `tipo_divergencia` | string \| null | Tipo de divergência (`null` = sem divergência) |
+| `camadas_atrasadas` | string[] \| null | Camadas com dado desatualizado (D-2 ou mais antigo) |
+| `camadas_sem_dados` | string[] \| null | Camadas sem nenhum registro de venda |
+| `atualizado_em` | string \| null | Data/hora em que a comparação foi executada |
 
 **Erros:**
 
@@ -150,6 +163,21 @@ curl "http://localhost:8000/historico/123"
 | 404 | Associação não encontrada (apenas `/historico/{associacao}`) |
 | 503 | Erro ao acessar o banco local |
 
+### `GET /ultima-atualizacao` — Última atualização do sistema
+
+Retorna a data/hora da comparação mais recente entre **todas** as associações. Útil para exibir um badge de "última atualização" no dashboard.
+
+```bash
+curl "http://localhost:8000/ultima-atualizacao"
+```
+
+**Resposta (200):**
+```json
+{ "atualizado_em": "2026-04-17T10:30:00" }
+```
+
+Retorna `null` em `atualizado_em` se nenhuma comparação foi realizada ainda.
+
 ## Fluxo Interno
 
 ```
@@ -157,20 +185,23 @@ POST /comparar?associacao=X  (ou GET)
        │
        ├─ Redshift [GoldVendas]        → última venda por farmácia em associacao.vendas
        ├─ Redshift [SilverSTGN_Dedup]  → última venda por farmácia em silver.cadcvend_staging_dedup
-       ├─ Redshift [cadfilia/dimensao] → enriquece nome/CNPJ de farmácias silver-only
+       ├─ Redshift [cadfilia/dimensao] → enriquece razão social/CNPJ de farmácias silver-only
        ├─ Comparação por cod_farmacia  → detecta divergências
        ├─ Business Connect (paralelo)  → status de migração de todas as farmácias
-       └─ PostgreSQL local             → persiste resultado e histórico
+       └─ PostgreSQL local             → UPSERT por (associacao, cod_farmacia); IDs estáveis entre rodadas
 
 GET /historico
        └─ PostgreSQL local             → última comparação de cada associação, com JOIN
-                                         em status_farmacias e divergencias
+                                         em status_farmacias, divergencias e comparacoes
 ```
 
 ## Observações
 
 - O CNPJ é salvo **sem formatação** (somente os 14 dígitos) na tabela `resultados_consolidados`.
-- Dados cadastrais (nome/CNPJ) de farmácias silver-only são enriquecidos via `silver.cadfilia_staging_dedup` com fallback para `associacao.dimensao_cadastro_lojas`.
+- O nome da farmácia usa `nom_fantasia` (nome fantasia).
+- Dados cadastrais (razão social/CNPJ) de farmácias silver-only são enriquecidos via `associacao.dimensao_cadastro_lojas` com fallback para `silver.cadfilia_staging_dedup`.
+- IDs de farmácias no banco local são **estáveis entre rodadas** — o UPSERT em `(associacao, cod_farmacia)` garante que o mesmo registro é reutilizado.
+- A tabela `comparacoes` é **append-only**: cada rodada gera uma nova linha de histórico.
 - Todos os passos críticos emitem logs com tempo de resposta no formato `⏳ Aguardando... / ✅ respondeu em Xs`.
 
 ## Documentação Interativa
@@ -211,5 +242,5 @@ app/
 ├── schemas.py           # Modelos Pydantic
 └── routers/
     ├── __init__.py
-    └── comparar.py      # Endpoints /comparar e /historico
+    └── comparar.py      # Endpoints /comparar, /historico e /ultima-atualizacao
 ```

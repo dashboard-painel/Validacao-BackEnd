@@ -84,11 +84,11 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
     """Busca nome e CNPJ de farmácias em duas fontes e faz merge priorizando dados preenchidos.
 
     Consulta em paralelo:
-    - silver.cadfilia_staging_dedup
     - associacao.dimensao_cadastro_lojas
+    - silver.cadfilia_staging_dedup
 
-    Para cada farmácia, usa o valor não-nulo disponível (cadfilia tem prioridade;
-    dimensao_cadastro_lojas preenche os gaps).
+    Para cada farmácia, usa o valor não-nulo disponível (dimensao_cadastro_lojas tem prioridade;
+    cadfilia preenche os gaps).
 
     Args:
         codigos: Lista de cod_farmacia a consultar
@@ -127,15 +127,15 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
         cursor.execute(query_dimensao, list(codigos))
         dimensao = {str(row[0]).strip(): {"nome_farmacia": row[1], "cnpj": row[2]} for row in cursor.fetchall()}
 
-    # Merge: cadfilia como base, dimensao preenche nulls
+    # Merge: dimensao_cadastro_lojas como base, cadfilia preenche nulls
     todos_codigos = set(cadfilia.keys()) | set(dimensao.keys())
     resultado = {}
     for cod in todos_codigos:
         c = cadfilia.get(cod, {})
         d = dimensao.get(cod, {})
         resultado[cod] = {
-            "nome_farmacia": c.get("nome_farmacia") or d.get("nome_farmacia"),
-            "cnpj": c.get("cnpj") or d.get("cnpj"),
+            "nome_farmacia": d.get("nome_farmacia") or c.get("nome_farmacia"),
+            "cnpj": d.get("cnpj") or c.get("cnpj"),
         }
 
     elapsed = time.perf_counter() - t0
