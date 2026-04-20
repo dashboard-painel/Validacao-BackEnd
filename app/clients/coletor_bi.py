@@ -15,62 +15,67 @@ COLETOR_PASSWORD = os.getenv("COLETOR_PASSWORD")
 
 logger = logging.getLogger(__name__)
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+def buscar_por_codigo(codigo: str) -> dict:
+    url = f"{COLETOR_URL}/{codigo}-dados_vendas"
 
-def buscar_por_codigo(codigos: str) -> str | None:
-    url = f"{COLETOR_URL}/{codigos}-dados_vendas"
+    try:
+        response = requests.get(
+            url,
+            auth=(COLETOR_USERNAME, COLETOR_PASSWORD),
+            timeout=30
+        )
 
-    t_auth = time.perf_counter()
+    except Exception:
+        logger.warning("Coletor BI request falhou para farmácia %s: timeout ou erro de conexão", codigo)
+        return {
+            "farmacia": codigo,
+            "ultima_data": None,
+            "ultima_hora": None
+        }
 
-    response = requests.get(
-        url,
-        auth=(COLETOR_USERNAME, COLETOR_PASSWORD),
-        timeout=30
-    )
-
-    logger.info("⏳ Autenticando no Coletor BI...")
 
     if (response.status_code != 200):
         logger.warning(
             "Coletor BI request falhou para farmácia %s: HTTP %s",
-            codigos,
+            codigo,
             response.status_code,
         )
-        return
-
-    logger.info("✅ Coletor BI autenticado em %.2fs — consultando %d farmácias...", time.perf_counter() - t_auth,
-                len(codigos))
+        return {
+            "farmacia": codigo,
+            "ultima_data": None,
+            "ultima_hora": None
+        }
 
     dados = response.json()
 
-    datas = [
-        item["dat_emissao"]
-        for item in dados
-        if isinstance(item, dict) and item.get("dat_emissao")
+    resultados = [
+        item for item in dados
+        if isinstance(item, dict)
+        and item.get("dat_emissao")
+        and item.get("hor_emissao")
     ]
 
-    horas = [
-        item["hor_emissao"]
-        for item in dados
-        if isinstance(item, dict) and item.get("hor_emissao")
-    ]
+    if not resultados:
+        return {
+            "farmacia": codigo,
+            "ultima_data": None,
+            "ultima_hora": None
+        }
 
-    if not datas or not horas:
-        return f"Farmácia: {codigos} sem dados de vendas no Coletor BI"
-
-    ultima_data = max(
-        datas,
-        key=lambda d: datetime.fromisoformat(d.replace("Z", "+00:00"))
+    ultimo_registro = max(
+        resultados,
+        key=lambda x: datetime.strptime(
+            f"{x['dat_emissao']} {x['hor_emissao']}",
+            "%Y-%m-%d %H:%M:%S"
+        )
     )
+    return {
+        "farmacia": codigo,
+        "ultima_data": ultimo_registro["dat_emissao"],
+        "ultima_hora": ultimo_registro["hor_emissao"]
+    }
 
-    ultimahora = max(
-        horas,
-        key=lambda h: datetime.strptime(h, "%H:%M:%S").time()
-    )
-
-    return f"{ultima_data} {ultimahora}"
-
-def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
+def buscar_por_associacao(codigos: list[str]) -> dict[str, dict]:
 
     if not codigos:
         return {}
@@ -79,10 +84,13 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
 
     logger.info("⏳ Consultando status no Coletor BI para %d farmácias...", len(codigos))
 
-    resultado: dict[str, str] = {}
+    resultado: dict[str, dict] = {}
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(buscar_por_codigo, codigos): codigos for codigos in codigos}
+        futures = {
+            executor.submit(buscar_por_codigo, codigo): codigo
+            for codigo in codigos
+        }
 
         for future in as_completed(futures):
 
@@ -92,8 +100,8 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
                 resultado[cod] = future.result()
 
             except Exception as e:
-                logger.warning("Coletor BI request falhou para farmácia %s: %s", codigos, e)
-                resultado[cod] = f"Farmácia: {codigos} sem dados de vendas no Coletor BI"
+                logger.warning("Coletor BI request falhou para farmácia %s: %s", cod, e)
 
     logger.info("✅ Coletor BI consultado em %.2fs", time.perf_counter() - t_auth)
+
     return resultado

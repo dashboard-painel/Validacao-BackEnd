@@ -1,7 +1,9 @@
 import logging
 import time
 
+from app.clients.coletor_bi import buscar_por_associacao
 from app.models.comparacao import Divergencia, ResultadoComparacao
+
 from app.repositories.comparacao_repository import (
     buscar_status_farmacias,
     salvar_comparacao,
@@ -132,6 +134,7 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
     try:
         status_dict = buscar_status_farmacias(list(resultado.todas_farmacias))
         logger.info("✅ Business Connect respondeu em %.2fs", time.perf_counter() - t_bc)
+
     except Exception as e:
         logger.warning(
             "Business Connect indisponível (%.2fs): %s: %s",
@@ -141,7 +144,24 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
         )
         status_dict = {cod: "Indisponível" for cod in resultado.todas_farmacias}
 
-    # 3. Persistência
+    # 3. Coletor BI
+    logger.info("⏳ Buscando status Coletor BI (%d farmácias)", len(resultado.todas_farmacias))
+    t_coletor = time.perf_counter()
+
+    try:
+        resultado_coletor = buscar_por_associacao(list(resultado.todas_farmacias))
+        logger.info("✅ Coletor BI respondeu em %.2fs", time.perf_counter() - t_coletor)
+
+    except Exception as e:
+        logger.warning(
+            "Coletor BI indisponivel (%.2fs): %s: %s",
+            time.perf_counter() - t_coletor,
+            type(e).__name__,
+            e,
+        )
+        resultado_coletor = {cod: "Indisponivel" for cod in resultado.todas_farmacias}
+
+    # 4. Persistência
     try:
         divergencias_dict = [
             {
@@ -165,14 +185,14 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
     except Exception as e:
         logger.warning("Erro ao salvar comparação (não crítico): %s: %s", type(e).__name__, e)
 
-    # 4. Persistir status Business Connect
+    # 5. Persistir status Business Connect + Coletor BI
     if resultado.comparacao_id is not None:
         try:
-            salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict)
+            salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict, resultado_coletor)
         except Exception as e:
             logger.warning("Erro ao salvar status_farmacias: %s: %s", type(e).__name__, e)
 
-    # 5. Montar divergências
+    # 6. Montar divergências
     divergencias = []
     for d in resultado.divergencias:
         c_atrasadas, c_sem_dados = camadas_atrasadas(
@@ -182,13 +202,14 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
         )
         divergencias.append(montar_divergencia_response(d, c_atrasadas, c_sem_dados))
 
-    # 6. Status farmácias
+    # 7. Status farmácias
+    todas_farmacias = set(status_dict.keys()) | set(resultado_coletor.keys())
     status_farmacias = [
-        montar_status_farmacia_response(cod, status)
-        for cod, status in status_dict.items()
+        montar_status_farmacia_response(cod, status_dict.get(cod, "Indisponível"), resultado_coletor.get(cod))
+        for cod in sorted(todas_farmacias)
     ]
 
-    # 7. Response final
+    # 8. Response final
     response = montar_comparacao_response(resultado, divergencias, status_farmacias)
 
     logger.info("🚀 Comparação finalizada em %.2fs", time.perf_counter() - t_req)

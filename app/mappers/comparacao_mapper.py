@@ -23,10 +23,13 @@ def montar_divergencia_response(d, camadas_atrasadas, camadas_sem_dados) -> Dive
     )
 
 
-def montar_status_farmacia_response(cod: str, status: str) -> FarmaciaStatusResponse:
+def montar_status_farmacia_response(cod: str, status: str, coletor_bi: dict | None = None) -> FarmaciaStatusResponse:
+    dados_bi = coletor_bi or {}
     return FarmaciaStatusResponse(
         cod_farmacia=cod,
         coletor_novo=status,
+        coletor_bi_ultima_data=dados_bi.get("ultima_data"),
+        coletor_bi_ultima_hora=dados_bi.get("ultima_hora"),
     )
 
 
@@ -58,6 +61,8 @@ def montar_resultado_consolidado(row) -> ResultadoConsolidadoResponse:
         ultima_venda_SilverSTGN_Dedup=row.get("ultima_venda_silverstgn_dedup"),
         ultima_hora_venda_SilverSTGN_Dedup=row.get("ultima_hora_venda_silverstgn_dedup"),
         coletor_novo=row.get("coletor_novo"),
+        coletor_bi_ultima_data=row.get("coletor_bi_ultima_data"),
+        coletor_bi_ultima_hora=row.get("coletor_bi_ultima_hora"),
         tipo_divergencia=row.get("tipo_divergencia"),
         atualizado_em=row.get("atualizado_em"),
         camadas_atrasadas=c_atrasadas,

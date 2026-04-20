@@ -17,8 +17,8 @@ def salvar_comparacao(associacao: str, resultados_gold: list[dict], resultados_s
     return _salvar_comparacao(associacao, resultados_gold, resultados_silver, divergencias)
 
 
-def salvar_status_farmacias(comparacao_id: int, associacao: str, status_dict: dict):
-    _salvar_status_farmacias(comparacao_id, associacao, status_dict)
+def salvar_status_farmacias(comparacao_id: int, associacao: str, status_dict: dict, coletor_bi: dict | None = None):
+    _salvar_status_farmacias(comparacao_id, associacao, status_dict, coletor_bi)
 
 
 def buscar_todos_consolidados():

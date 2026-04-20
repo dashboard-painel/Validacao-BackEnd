@@ -73,18 +73,20 @@ class DivergenciaResponse(BaseModel):
 
 
 class FarmaciaStatusResponse(BaseModel):
-    """Status de migração de uma farmácia no Business Connect."""
+    """Status de migração de uma farmácia no Business Connect e no Coletor BI."""
 
     cod_farmacia: str = Field(..., description="Código da farmácia")
     coletor_novo: str = Field(
         ...,
         description=(
-            "Status do coletor: "
+            "Status do coletor (Business Connect): "
             "'OK, sem registro' | "
             "'Pendente de envio no dia YYYY-MM-DD' | "
             "'Indisponível'"
         ),
     )
+    coletor_bi_ultima_data: Optional[str] = Field(None, description="Data da última venda no Coletor BI (YYYY-MM-DD)")
+    coletor_bi_ultima_hora: Optional[str] = Field(None, description="Hora da última venda no Coletor BI (HH:MM:SS)")
 
 
 class ResultadoConsolidadoResponse(BaseModel):
@@ -99,6 +101,8 @@ class ResultadoConsolidadoResponse(BaseModel):
     ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Última venda em silver.cadcvend_staging_dedup")
     ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")
     coletor_novo: Optional[str] = Field(None, description="Status do coletor no Business Connect")
+    coletor_bi_ultima_data: Optional[str] = Field(None, description="Data da última venda no Coletor BI (YYYY-MM-DD)")
+    coletor_bi_ultima_hora: Optional[str] = Field(None, description="Hora da última venda no Coletor BI (HH:MM:SS)")
     tipo_divergencia: Optional[str] = Field(None, description="Tipo de divergência, null se não há divergência")
     camadas_atrasadas: Optional[list[str]] = Field(
         None,
