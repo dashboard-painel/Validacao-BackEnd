@@ -33,7 +33,6 @@ def buscar_por_codigo(codigo: str) -> dict:
             "ultima_hora": None
         }
 
-
     if (response.status_code != 200):
         logger.warning(
             "Coletor BI request falhou para farmácia %s: HTTP %s",

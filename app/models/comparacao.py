@@ -5,13 +5,6 @@ from typing import Optional
 
 @dataclass
 class Divergencia:
-    """Farmácia com divergência entre GoldVendas e SilverSTGN_Dedup.
-
-    Tipos possíveis:
-    - "data_diferente": presente em ambas as fontes mas com ultima_venda diferente
-    - "apenas_gold_vendas": presente somente em associacao.vendas
-    - "apenas_silver_stgn_dedup": presente somente em silver.cadcvend_staging_dedup
-    """
 
     cod_farmacia: str
     nome_farmacia: Optional[str]
@@ -25,11 +18,6 @@ class Divergencia:
 
 @dataclass
 class ResultadoComparacao:
-    """Resultado completo de uma comparação entre GoldVendas e SilverSTGN_Dedup.
-
-    Contém os totais de registros em cada fonte, o número de divergências
-    e a lista detalhada de cada divergência encontrada.
-    """
 
     associacao: str
     total_gold_vendas: int
