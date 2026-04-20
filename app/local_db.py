@@ -302,7 +302,7 @@ def buscar_todos_consolidados() -> list[dict]:
             return [dict(row) for row in cur.fetchall()]
 
 
-def buscar_consolidado_por_associacao(associacao: str) -> list[dict]:
+def buscar_historico_por_associacao(associacao: str) -> list[dict]:
     """Busca os resultados consolidados da última rodada de uma associação.
 
     Args:
@@ -315,6 +315,7 @@ def buscar_consolidado_por_associacao(associacao: str) -> list[dict]:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
                 SELECT
+                    rc.associacao,
                     rc.cod_farmacia,
                     rc.nome_farmacia,
                     rc.cnpj,

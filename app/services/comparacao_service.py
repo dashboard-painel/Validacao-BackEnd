@@ -1,67 +1,36 @@
-"""Módulo de comparação entre resultados das duas queries do Redshift."""
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Optional
 
-from app.queries import execute_gold_vendas, execute_silver_stgn_dedup, execute_cadfilia_por_codigos
-from app.local_db import salvar_comparacao
+from app.models.comparacao import Divergencia, ResultadoComparacao
+from app.repositories.comparacao_repository import (
+    buscar_status_farmacias,
+    salvar_comparacao,
+    salvar_status_farmacias,
+)
+from app.repositories.redshift_repository import (
+    execute_gold_vendas,
+    execute_silver_stgn_dedup,
+    execute_cadfilia_por_codigos,
+)
+from app.mappers.comparacao_mapper import (
+    montar_comparacao_response,
+    montar_divergencia_response,
+    montar_status_farmacia_response,
+)
+from app.schemas import ComparacaoResponse
+from app.utils import camadas_atrasadas
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class Divergencia:
-    """Representa uma farmácia com divergência entre GoldVendas e SilverSTGN_Dedup.
-
-    Tipos possíveis:
-    - "data_diferente": presente em ambas as fontes mas com ultima_venda diferente
-    - "apenas_gold_vendas": presente somente em associacao.vendas
-    - "apenas_silver_stgn_dedup": presente somente em silver.cadcvend_staging_dedup
-    """
-
-    cod_farmacia: str
-    nome_farmacia: Optional[str]
-    cnpj: Optional[str]
-    ultima_venda_GoldVendas: Optional[str]
-    ultima_hora_venda_GoldVendas: Optional[str]
-    ultima_venda_SilverSTGN_Dedup: Optional[str]
-    ultima_hora_venda_SilverSTGN_Dedup: Optional[str]
-    tipo_divergencia: str  # "data_diferente", "apenas_gold_vendas", "apenas_silver_stgn_dedup"
-
-
-@dataclass
-class ResultadoComparacao:
-    """Resultado completo de uma comparação entre GoldVendas e SilverSTGN_Dedup.
-
-    Contém os totais de registros em cada fonte, o número de divergências
-    e a lista detalhada de cada divergência encontrada.
-    """
-
-    associacao: str
-    total_gold_vendas: int
-    total_silver_stgn_dedup: int
-    total_divergencias: int
-    divergencias: list[Divergencia] = field(default_factory=list)
-    comparacao_id: Optional[int] = None  # ID no banco local após salvar
-    todas_farmacias: set = field(default_factory=set)  # union de GoldVendas + SilverSTGN_Dedup
-
-
-def comparar_resultados(associacao: str, salvar: bool = True) -> ResultadoComparacao:
+def _comparar_resultados(associacao: str) -> ResultadoComparacao:
     """Executa as queries no Redshift e compara os resultados por cod_farmacia.
 
     Busca a última venda registrada por farmácia em cada fonte (sem filtro de data)
     e identifica 3 tipos de divergência em ultima_venda:
-    - data_diferente: farmácia presente em ambas mas com datas distintas
-    - apenas_gold_vendas: farmácia presente somente em associacao.vendas
-    - apenas_silver_stgn_dedup: farmácia presente somente em silver.cadcvend_staging_dedup
-
-    Args:
-        associacao: Código da associação para filtrar
-        salvar: Se True, persiste todos os resultados no PostgreSQL local
-
-    Returns:
-        ResultadoComparacao com totais e lista completa de divergências
+    - data_diferente: presente em ambas mas com datas distintas
+    - apenas_gold_vendas: presente somente em associacao.vendas
+    - apenas_silver_stgn_dedup: presente somente em silver.cadcvend_staging_dedup
     """
     logger.info("🔍 Iniciando comparação — associacao=%s", associacao)
     t_total = time.perf_counter()
@@ -74,7 +43,6 @@ def comparar_resultados(associacao: str, salvar: bool = True) -> ResultadoCompar
 
     todas_farmacias = set(gold_by_farmacia.keys()) | set(silver_by_farmacia.keys())
 
-    # Busca nome/CNPJ no cadastro (cadfilia) apenas para farmácias sem registro em Gold
     silver_only_codes = [cod for cod in silver_by_farmacia if cod not in gold_by_farmacia]
     cadfilia_lookup = execute_cadfilia_por_codigos(silver_only_codes)
     logger.info(
@@ -99,7 +67,7 @@ def comparar_resultados(associacao: str, salvar: bool = True) -> ResultadoCompar
                 ultima_hora_venda_GoldVendas=str(r_gold.get("ultima_hora_venda")) if r_gold.get("ultima_hora_venda") else None,
                 ultima_venda_SilverSTGN_Dedup=None,
                 ultima_hora_venda_SilverSTGN_Dedup=None,
-                tipo_divergencia="apenas_gold_vendas"
+                tipo_divergencia="apenas_gold_vendas",
             ))
         elif r_silver and not r_gold:
             cadfilia = cadfilia_lookup.get(cod, {})
@@ -111,7 +79,7 @@ def comparar_resultados(associacao: str, salvar: bool = True) -> ResultadoCompar
                 ultima_hora_venda_GoldVendas=None,
                 ultima_venda_SilverSTGN_Dedup=str(r_silver.get("ultima_venda")) if r_silver.get("ultima_venda") else None,
                 ultima_hora_venda_SilverSTGN_Dedup=str(r_silver.get("ultima_hora_venda")) if r_silver.get("ultima_hora_venda") else None,
-                tipo_divergencia="apenas_silver_stgn_dedup"
+                tipo_divergencia="apenas_silver_stgn_dedup",
             ))
         else:
             venda_gold = str(r_gold.get("ultima_venda")) if r_gold.get("ultima_venda") else None
@@ -126,7 +94,7 @@ def comparar_resultados(associacao: str, salvar: bool = True) -> ResultadoCompar
                     ultima_hora_venda_GoldVendas=str(r_gold.get("ultima_hora_venda")) if r_gold.get("ultima_hora_venda") else None,
                     ultima_venda_SilverSTGN_Dedup=venda_silver,
                     ultima_hora_venda_SilverSTGN_Dedup=str(r_silver.get("ultima_hora_venda")) if r_silver.get("ultima_hora_venda") else None,
-                    tipo_divergencia="data_diferente"
+                    tipo_divergencia="data_diferente",
                 ))
 
     resultado = ResultadoComparacao(
@@ -136,9 +104,45 @@ def comparar_resultados(associacao: str, salvar: bool = True) -> ResultadoCompar
         total_divergencias=len(divergencias),
         divergencias=divergencias,
         todas_farmacias=todas_farmacias,
+        resultados_gold_vendas=resultados_gold_vendas,
+        resultados_silver_stgn_dedup=resultados_silver_stgn_dedup,
     )
 
-    if salvar:
+    logger.info(
+        "🏁 Comparação concluída em %.2fs — gold=%d, silver=%d, divergências=%d",
+        time.perf_counter() - t_total,
+        resultado.total_gold_vendas,
+        resultado.total_silver_stgn_dedup,
+        resultado.total_divergencias,
+    )
+    return resultado
+
+
+def executar_comparacao(associacao: str) -> ComparacaoResponse:
+    logger.info("📥 Comparação iniciada — associacao=%s", associacao)
+    t_req = time.perf_counter()
+
+    # 1. Comparação Redshift
+    resultado = _comparar_resultados(associacao)
+
+    # 2. Business Connect
+    logger.info("⏳ Buscando status Business Connect (%d farmácias)", len(resultado.todas_farmacias))
+    t_bc = time.perf_counter()
+
+    try:
+        status_dict = buscar_status_farmacias(list(resultado.todas_farmacias))
+        logger.info("✅ Business Connect respondeu em %.2fs", time.perf_counter() - t_bc)
+    except Exception as e:
+        logger.warning(
+            "Business Connect indisponível (%.2fs): %s: %s",
+            time.perf_counter() - t_bc,
+            type(e).__name__,
+            e,
+        )
+        status_dict = {cod: "Indisponível" for cod in resultado.todas_farmacias}
+
+    # 3. Persistência
+    try:
         divergencias_dict = [
             {
                 "cod_farmacia": d.cod_farmacia,
@@ -148,20 +152,44 @@ def comparar_resultados(associacao: str, salvar: bool = True) -> ResultadoCompar
                 "ultima_hora_venda_GoldVendas": d.ultima_hora_venda_GoldVendas,
                 "ultima_venda_SilverSTGN_Dedup": d.ultima_venda_SilverSTGN_Dedup,
                 "ultima_hora_venda_SilverSTGN_Dedup": d.ultima_hora_venda_SilverSTGN_Dedup,
-                "tipo_divergencia": d.tipo_divergencia
+                "tipo_divergencia": d.tipo_divergencia,
             }
-            for d in divergencias
+            for d in resultado.divergencias
         ]
         resultado.comparacao_id = salvar_comparacao(
-            associacao, resultados_gold_vendas, resultados_silver_stgn_dedup, divergencias_dict
+            associacao,
+            resultado.resultados_gold_vendas,
+            resultado.resultados_silver_stgn_dedup,
+            divergencias_dict,
         )
+    except Exception as e:
+        logger.warning("Erro ao salvar comparação (não crítico): %s: %s", type(e).__name__, e)
 
-    elapsed_total = time.perf_counter() - t_total
-    logger.info(
-        "🏁 Comparação concluída em %.2fs — gold=%d, silver=%d, divergências=%d",
-        elapsed_total,
-        resultado.total_gold_vendas,
-        resultado.total_silver_stgn_dedup,
-        resultado.total_divergencias,
-    )
-    return resultado
+    # 4. Persistir status Business Connect
+    if resultado.comparacao_id is not None:
+        try:
+            salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict)
+        except Exception as e:
+            logger.warning("Erro ao salvar status_farmacias: %s: %s", type(e).__name__, e)
+
+    # 5. Montar divergências
+    divergencias = []
+    for d in resultado.divergencias:
+        c_atrasadas, c_sem_dados = camadas_atrasadas(
+            d.ultima_venda_GoldVendas,
+            d.ultima_venda_SilverSTGN_Dedup,
+            status_dict.get(d.cod_farmacia),
+        )
+        divergencias.append(montar_divergencia_response(d, c_atrasadas, c_sem_dados))
+
+    # 6. Status farmácias
+    status_farmacias = [
+        montar_status_farmacia_response(cod, status)
+        for cod, status in status_dict.items()
+    ]
+
+    # 7. Response final
+    response = montar_comparacao_response(resultado, divergencias, status_farmacias)
+
+    logger.info("🚀 Comparação finalizada em %.2fs", time.perf_counter() - t_req)
+    return response
