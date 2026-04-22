@@ -58,6 +58,8 @@ def montar_resultado_consolidado(row) -> ResultadoConsolidadoResponse:
         cod_farmacia=row["cod_farmacia"],
         nome_farmacia=row.get("nome_farmacia"),
         cnpj=row.get("cnpj"),
+        sit_contrato=row.get("sit_contrato"),
+        codigo_rede=row.get("codigo_rede"),
         ultima_venda_GoldVendas=row.get("ultima_venda_goldvendas"),
         ultima_hora_venda_GoldVendas=row.get("ultima_hora_venda_goldvendas"),
         ultima_venda_SilverSTGN_Dedup=row.get("ultima_venda_silverstgn_dedup"),
