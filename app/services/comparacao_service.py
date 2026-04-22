@@ -174,6 +174,8 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
                 "cod_farmacia": d.cod_farmacia,
                 "nome_farmacia": d.nome_farmacia,
                 "cnpj": d.cnpj,
+                "sit_contrato": d.sit_contrato,
+                "codigo_rede": d.codigo_rede,
                 "ultima_venda_GoldVendas": d.ultima_venda_GoldVendas,
                 "ultima_hora_venda_GoldVendas": d.ultima_hora_venda_GoldVendas,
                 "ultima_venda_SilverSTGN_Dedup": d.ultima_venda_SilverSTGN_Dedup,
