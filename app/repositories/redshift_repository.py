@@ -89,7 +89,12 @@ def execute_gold_vendas(associacao: str) -> list[dict]:
 
 
 def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
-    """Busca dados cadastrais de farmácias em associacao.dimensao_cadastro_lojas.
+    """Busca dados cadastrais de farmácias priorizando associacao.dimensao_cadastro_lojas
+    e usando silver.cadfilia_staging_dedup apenas para preencher campos nulos.
+
+    Fluxo:
+    - dimensao_cadastro_lojas é a fonte principal (inclui sit_contrato e codigo_rede)
+    - cadfilia_staging_dedup preenche apenas nome_farmacia e cnpj quando nulos na dimensao
 
     Args:
         codigos: Lista de cod_farmacia a consultar
@@ -114,16 +119,24 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
         GROUP BY cod_farmacia
     """
 
+    query_cadfilia = f"""
+        SELECT cod_farmacia, MAX(nom_fantasia) AS nome_farmacia, MAX(num_cnpj) AS cnpj
+        FROM silver.cadfilia_staging_dedup
+        WHERE cod_farmacia IN ({placeholders})
+        GROUP BY cod_farmacia
+    """
+
     logger.info(
-        "⏳ Aguardando resposta Redshift [dimensao_cadastro_lojas] — %d códigos...",
+        "⏳ Aguardando resposta Redshift [dimensao_cadastro_lojas + cadfilia gap-fill] — %d códigos...",
         len(codigos),
     )
     t0 = time.perf_counter()
 
     with get_connection() as conn:
         cursor = conn.cursor()
+
         cursor.execute(query_dimensao, list(codigos))
-        resultado = {
+        dimensao = {
             str(row[0]).strip(): {
                 "nome_farmacia": row[1],
                 "cnpj": row[2],
@@ -133,11 +146,38 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
             for row in cursor.fetchall()
         }
 
+        # Consulta cadfilia apenas se houver gaps de nome ou CNPJ na dimensao
+        codigos_com_gap = [
+            cod for cod in codigos
+            if not dimensao.get(str(cod).strip(), {}).get("nome_farmacia")
+            or not dimensao.get(str(cod).strip(), {}).get("cnpj")
+        ]
+        cadfilia: dict[str, dict] = {}
+        if codigos_com_gap:
+            placeholders_gap = ",".join(["%s"] * len(codigos_com_gap))
+            query_cadfilia_gap = query_cadfilia.replace(f"IN ({placeholders})", f"IN ({placeholders_gap})")
+            cursor.execute(query_cadfilia_gap, codigos_com_gap)
+            cadfilia = {str(row[0]).strip(): {"nome_farmacia": row[1], "cnpj": row[2]} for row in cursor.fetchall()}
+
+    # Merge: dimensao como base, cadfilia preenche nome/cnpj nulos
+    todos_codigos = set(str(c).strip() for c in codigos)
+    resultado = {}
+    for cod in todos_codigos:
+        d = dimensao.get(cod, {})
+        c = cadfilia.get(cod, {})
+        resultado[cod] = {
+            "nome_farmacia": d.get("nome_farmacia") or c.get("nome_farmacia"),
+            "cnpj": d.get("cnpj") or c.get("cnpj"),
+            "sit_contrato": d.get("sit_contrato"),
+            "codigo_rede": d.get("codigo_rede"),
+        }
+
     elapsed = time.perf_counter() - t0
     logger.info(
-        "✅ Redshift [dimensao_cadastro_lojas] respondeu em %.2fs — %d registros retornados",
+        "✅ Redshift [dimensao + cadfilia gap-fill] respondeu em %.2fs — %d registros (gap-fill em %d)",
         elapsed,
         len(resultado),
+        len(codigos_com_gap),
     )
     return resultado
 
