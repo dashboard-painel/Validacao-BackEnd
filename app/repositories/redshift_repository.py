@@ -11,23 +11,29 @@ SELECT
     cod_farmacia,
     nome_farmacia,
     cnpj,
+    sit_contrato,
+    codigo_rede,
     ultima_venda,
     ultima_hora_venda
 FROM (
     SELECT
-        codigo AS cod_farmacia,
-        nom_fantasia AS nome_farmacia,
-        num_cnpj AS cnpj,
-        dat_emissao AS ultima_venda,
-        dat_hora_emissao AS ultima_hora_venda,
+        v.codigo AS cod_farmacia,
+        d.nom_farmacia AS nome_farmacia,
+        d.num_cnpj AS cnpj,
+        d.sit_contrato AS sit_contrato,
+        d.codigo_rede AS codigo_rede,
+        v.dat_emissao AS ultima_venda,
+        v.dat_hora_emissao AS ultima_hora_venda,
         ROW_NUMBER() OVER (
-            PARTITION BY codigo
-            ORDER BY dat_emissao DESC, dat_hora_emissao DESC
+            PARTITION BY v.codigo
+            ORDER BY v.dat_emissao DESC, v.dat_hora_emissao DESC
         ) AS rn
     FROM
-        associacao.vendas
+        associacao.vendas v
+    LEFT JOIN
+        associacao.dimensao_cadastro_lojas d ON d.cod_farmacia = v.codigo
     WHERE
-        associacao = %s
+        v.associacao = %s
 ) sub
 WHERE rn = 1
 ORDER BY ultima_venda DESC, ultima_hora_venda DESC;
@@ -60,13 +66,15 @@ def execute_gold_vendas(associacao: str) -> list[dict]:
     """Executa a query na tabela associacao.vendas (GoldVendas) no Redshift.
 
     Retorna a última venda registrada por farmácia (cod_farmacia), sem filtro de data.
+    Dados cadastrais (nome_farmacia, cnpj, sit_contrato, codigo_rede) são obtidos via
+    LEFT JOIN com associacao.dimensao_cadastro_lojas.
 
     Args:
         associacao: Código da associação para filtrar
 
     Returns:
         Lista de dicionários com chaves: cod_farmacia, nome_farmacia, cnpj,
-        ultima_venda, ultima_hora_venda
+        sit_contrato, codigo_rede, ultima_venda, ultima_hora_venda
     """
     logger.info("⏳ Aguardando resposta Redshift [GoldVendas] — associacao=%s...", associacao)
     t0 = time.perf_counter()
@@ -81,65 +89,106 @@ def execute_gold_vendas(associacao: str) -> list[dict]:
 
 
 def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
-    """Busca nome e CNPJ de farmácias em duas fontes e faz merge priorizando dados preenchidos.
+    """Busca dados cadastrais de farmácias priorizando associacao.dimensao_cadastro_lojas
+    e usando silver.cadfilia_staging_dedup apenas para preencher campos nulos.
 
-    Consulta em paralelo:
-    - associacao.dimensao_cadastro_lojas
-    - silver.cadfilia_staging_dedup
-
-    Para cada farmácia, usa o valor não-nulo disponível (dimensao_cadastro_lojas tem prioridade;
-    cadfilia preenche os gaps).
+    Fluxo:
+    - dimensao_cadastro_lojas é a fonte principal (inclui sit_contrato e codigo_rede)
+    - cadfilia_staging_dedup preenche apenas nome_farmacia e cnpj quando nulos na dimensao
 
     Args:
         codigos: Lista de cod_farmacia a consultar
 
     Returns:
-        Dict {cod_farmacia: {"nome_farmacia": ..., "cnpj": ...}}
+        Dict {cod_farmacia: {"nome_farmacia": ..., "cnpj": ..., "sit_contrato": ..., "codigo_rede": ...}}
     """
     if not codigos:
         return {}
 
     placeholders = ",".join(["%s"] * len(codigos))
 
-    query_cadfilia = f"""
-        SELECT cod_farmacia, MAX(nom_fantasia) AS nome_farmacia, MAX(num_cnpj) AS cnpj
-        FROM silver.cadfilia_staging_dedup
-        WHERE cod_farmacia IN ({placeholders})
-        GROUP BY cod_farmacia
-    """
-
     query_dimensao = f"""
-        SELECT cod_farmacia, MAX(nom_fantasia) AS nome_farmacia, MAX(num_cnpj) AS cnpj
+        SELECT
+            cod_farmacia,
+            MAX(nom_farmacia) AS nome_farmacia,
+            MAX(num_cnpj) AS cnpj,
+            MAX(sit_contrato) AS sit_contrato,
+            MAX(codigo_rede) AS codigo_rede
         FROM associacao.dimensao_cadastro_lojas
         WHERE cod_farmacia IN ({placeholders})
         GROUP BY cod_farmacia
     """
 
-    logger.info("⏳ Aguardando resposta Redshift [cadfilia + dimensao_cadastro_lojas] — %d códigos...", len(codigos))
+    query_cadfilia = f"""
+        SELECT cod_farmacia,
+               MAX(COALESCE(nom_fantasia, raz_social)) AS nome_farmacia,
+               MAX(num_cnpj) AS cnpj,
+               MAX(flg_ativo) AS flg_ativo
+        FROM silver.cadfilia_staging_dedup
+        WHERE cod_farmacia IN ({placeholders})
+        GROUP BY cod_farmacia
+    """
+
+    logger.info(
+        "⏳ Aguardando resposta Redshift [dimensao_cadastro_lojas + cadfilia gap-fill] — %d códigos...",
+        len(codigos),
+    )
     t0 = time.perf_counter()
 
     with get_connection() as conn:
         cursor = conn.cursor()
 
-        cursor.execute(query_cadfilia, list(codigos))
-        cadfilia = {str(row[0]).strip(): {"nome_farmacia": row[1], "cnpj": row[2]} for row in cursor.fetchall()}
-
         cursor.execute(query_dimensao, list(codigos))
-        dimensao = {str(row[0]).strip(): {"nome_farmacia": row[1], "cnpj": row[2]} for row in cursor.fetchall()}
+        dimensao = {
+            str(row[0]).strip(): {
+                "nome_farmacia": row[1],
+                "cnpj": row[2],
+                "sit_contrato": row[3],
+                "codigo_rede": row[4],
+            }
+            for row in cursor.fetchall()
+        }
 
-    # Merge: dimensao_cadastro_lojas como base, cadfilia preenche nulls
-    todos_codigos = set(cadfilia.keys()) | set(dimensao.keys())
+        # Consulta cadfilia se houver gaps de nome, CNPJ ou sit_contrato na dimensao
+        codigos_com_gap = [
+            cod for cod in codigos
+            if not dimensao.get(str(cod).strip(), {}).get("nome_farmacia")
+            or not dimensao.get(str(cod).strip(), {}).get("cnpj")
+            or not dimensao.get(str(cod).strip(), {}).get("sit_contrato")
+        ]
+        cadfilia: dict[str, dict] = {}
+        if codigos_com_gap:
+            placeholders_gap = ",".join(["%s"] * len(codigos_com_gap))
+            query_cadfilia_gap = query_cadfilia.replace(f"IN ({placeholders})", f"IN ({placeholders_gap})")
+            cursor.execute(query_cadfilia_gap, codigos_com_gap)
+            cadfilia = {
+                str(row[0]).strip(): {"nome_farmacia": row[1], "cnpj": row[2], "flg_ativo": row[3]}
+                for row in cursor.fetchall()
+            }
+
+    # Merge: dimensao como base, cadfilia preenche nome/cnpj nulos
+    todos_codigos = set(str(c).strip() for c in codigos)
     resultado = {}
     for cod in todos_codigos:
-        c = cadfilia.get(cod, {})
         d = dimensao.get(cod, {})
+        c = cadfilia.get(cod, {})
+        sit_contrato = d.get("sit_contrato")
+        if not sit_contrato and c.get("flg_ativo"):
+            sit_contrato = "ATIVO" if str(c["flg_ativo"]).strip().upper() == "A" else None
         resultado[cod] = {
             "nome_farmacia": d.get("nome_farmacia") or c.get("nome_farmacia"),
             "cnpj": d.get("cnpj") or c.get("cnpj"),
+            "sit_contrato": sit_contrato,
+            "codigo_rede": d.get("codigo_rede"),
         }
 
     elapsed = time.perf_counter() - t0
-    logger.info("✅ Redshift [cadfilia + dimensao] respondeu em %.2fs — %d registros mesclados", elapsed, len(resultado))
+    logger.info(
+        "✅ Redshift [dimensao + cadfilia gap-fill] respondeu em %.2fs — %d registros (gap-fill em %d)",
+        elapsed,
+        len(resultado),
+        len(codigos_com_gap),
+    )
     return resultado
 
 
