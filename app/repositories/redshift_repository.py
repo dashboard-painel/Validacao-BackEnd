@@ -17,23 +17,22 @@ SELECT
     ultima_hora_venda
 FROM (
     SELECT
-        v.codigo AS cod_farmacia,
+        d.cod_farmacia,
         d.nom_farmacia AS nome_farmacia,
         d.num_cnpj AS cnpj,
-        d.sit_contrato AS sit_contrato,
-        d.codigo_rede AS codigo_rede,
+        d.sit_contrato,
+        d.codigo_rede,
         v.dat_emissao AS ultima_venda,
         v.dat_hora_emissao AS ultima_hora_venda,
         ROW_NUMBER() OVER (
-            PARTITION BY v.codigo
+            PARTITION BY d.cod_farmacia
             ORDER BY v.dat_emissao DESC, v.dat_hora_emissao DESC
         ) AS rn
-    FROM
-        associacao.vendas v
-    LEFT JOIN
-        associacao.dimensao_cadastro_lojas d ON d.cod_farmacia = v.codigo
-    WHERE
-        v.associacao = %s
+    FROM associacao.dimensao_cadastro_lojas d
+    LEFT JOIN associacao.vendas v
+        ON v.codigo = d.cod_farmacia
+        AND v.associacao = %s
+    WHERE d.codigo_rede = %s
 ) sub
 WHERE rn = 1
 ORDER BY ultima_venda DESC, ultima_hora_venda DESC;
@@ -80,7 +79,7 @@ def execute_gold_vendas(associacao: str) -> list[dict]:
     t0 = time.perf_counter()
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(QUERY_GOLD_VENDAS, (associacao,))
+        cursor.execute(QUERY_GOLD_VENDAS, (associacao,associacao))
         column_names = [desc[0] for desc in cursor.description]
         rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
     elapsed = time.perf_counter() - t0
