@@ -42,6 +42,8 @@ class DivergenciaResponse(BaseModel):
     cod_farmacia: str = Field(..., description="Código da farmácia")
     nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (quando disponível)")
     cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (quando disponível)")
+    sit_contrato: Optional[str] = Field(None, description="Situação do contrato da farmácia (quando disponível)")
+    codigo_rede: Optional[str] = Field(None, description="Código da rede da farmácia (quando disponível)")
     ultima_venda_GoldVendas: Optional[str] = Field(None, description="Data da última venda em associacao.vendas (YYYY-MM-DD)")
     ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
     ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Data da última venda em silver.cadcvend_staging_dedup (YYYY-MM-DD)")

@@ -14,6 +14,8 @@ class Divergencia:
     ultima_venda_SilverSTGN_Dedup: Optional[str]
     ultima_hora_venda_SilverSTGN_Dedup: Optional[str]
     tipo_divergencia: str  # "data_diferente", "apenas_gold_vendas", "apenas_silver_stgn_dedup"
+    sit_contrato: Optional[str] = None
+    codigo_rede: Optional[str] = None
 
 
 @dataclass
