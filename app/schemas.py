@@ -98,6 +98,8 @@ class ResultadoConsolidadoResponse(BaseModel):
     cod_farmacia: str = Field(..., description="Código da farmácia")
     nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia")
     cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (somente dígitos)")
+    sit_contrato: Optional[str] = Field(None, description="Situação do contrato da farmácia")
+    codigo_rede: Optional[str] = Field(None, description="Código da rede da farmácia")
     ultima_venda_GoldVendas: Optional[str] = Field(None, description="Última venda em associacao.vendas")
     ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
     ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Última venda em silver.cadcvend_staging_dedup")
