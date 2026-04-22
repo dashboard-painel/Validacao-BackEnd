@@ -45,6 +45,7 @@ def _comparar_resultados(associacao: str) -> ResultadoComparacao:
 
     todas_farmacias = set(gold_by_farmacia.keys()) | set(silver_by_farmacia.keys())
 
+    # Lookup cadastral para farmácias silver-only (nome, cnpj, sit_contrato, codigo_rede)
     silver_only_codes = [cod for cod in silver_by_farmacia if cod not in gold_by_farmacia]
     cadfilia_lookup = execute_cadfilia_por_codigos(silver_only_codes)
     logger.info(
@@ -53,6 +54,19 @@ def _comparar_resultados(associacao: str) -> ResultadoComparacao:
         len(cadfilia_lookup),
         silver_only_codes[:5],
     )
+
+    # Fallback de sit_contrato para farmácias gold com valor nulo na dimensao
+    gold_sem_contrato = [cod for cod, r in gold_by_farmacia.items() if not r.get("sit_contrato")]
+    if gold_sem_contrato:
+        gold_fallback = execute_cadfilia_por_codigos(gold_sem_contrato)
+        for cod, dados in gold_fallback.items():
+            if dados.get("sit_contrato") and cod in gold_by_farmacia:
+                gold_by_farmacia[cod]["sit_contrato"] = dados["sit_contrato"]
+        logger.info(
+            "fallback sit_contrato gold — %d farmácias consultadas, %d preenchidas",
+            len(gold_sem_contrato),
+            sum(1 for cod in gold_sem_contrato if gold_by_farmacia.get(cod, {}).get("sit_contrato")),
+        )
 
     divergencias = []
 

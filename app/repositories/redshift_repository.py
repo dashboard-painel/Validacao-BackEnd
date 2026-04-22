@@ -120,7 +120,10 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
     """
 
     query_cadfilia = f"""
-        SELECT cod_farmacia, MAX(nom_fantasia) AS nome_farmacia, MAX(num_cnpj) AS cnpj
+        SELECT cod_farmacia,
+               MAX(COALESCE(nom_fantasia, raz_social)) AS nome_farmacia,
+               MAX(num_cnpj) AS cnpj,
+               MAX(flg_ativo) AS flg_ativo
         FROM silver.cadfilia_staging_dedup
         WHERE cod_farmacia IN ({placeholders})
         GROUP BY cod_farmacia
@@ -146,18 +149,22 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
             for row in cursor.fetchall()
         }
 
-        # Consulta cadfilia apenas se houver gaps de nome ou CNPJ na dimensao
+        # Consulta cadfilia se houver gaps de nome, CNPJ ou sit_contrato na dimensao
         codigos_com_gap = [
             cod for cod in codigos
             if not dimensao.get(str(cod).strip(), {}).get("nome_farmacia")
             or not dimensao.get(str(cod).strip(), {}).get("cnpj")
+            or not dimensao.get(str(cod).strip(), {}).get("sit_contrato")
         ]
         cadfilia: dict[str, dict] = {}
         if codigos_com_gap:
             placeholders_gap = ",".join(["%s"] * len(codigos_com_gap))
             query_cadfilia_gap = query_cadfilia.replace(f"IN ({placeholders})", f"IN ({placeholders_gap})")
             cursor.execute(query_cadfilia_gap, codigos_com_gap)
-            cadfilia = {str(row[0]).strip(): {"nome_farmacia": row[1], "cnpj": row[2]} for row in cursor.fetchall()}
+            cadfilia = {
+                str(row[0]).strip(): {"nome_farmacia": row[1], "cnpj": row[2], "flg_ativo": row[3]}
+                for row in cursor.fetchall()
+            }
 
     # Merge: dimensao como base, cadfilia preenche nome/cnpj nulos
     todos_codigos = set(str(c).strip() for c in codigos)
@@ -165,10 +172,13 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
     for cod in todos_codigos:
         d = dimensao.get(cod, {})
         c = cadfilia.get(cod, {})
+        sit_contrato = d.get("sit_contrato")
+        if not sit_contrato and c.get("flg_ativo"):
+            sit_contrato = "ATIVO" if str(c["flg_ativo"]).strip().upper() == "A" else None
         resultado[cod] = {
             "nome_farmacia": d.get("nome_farmacia") or c.get("nome_farmacia"),
             "cnpj": d.get("cnpj") or c.get("cnpj"),
-            "sit_contrato": d.get("sit_contrato"),
+            "sit_contrato": sit_contrato,
             "codigo_rede": d.get("codigo_rede"),
         }
 
