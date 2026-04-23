@@ -49,6 +49,7 @@ Retorna a data/hora da comparação mais recente entre **todas** as associaçõe
     "cnpj": "12345678000199",
     "sit_contrato": "ATIVO",
     "codigo_rede": "80",
+    "num_versao": "4.2.1",
     "ultima_venda_GoldVendas": "2026-04-08",
     "ultima_hora_venda_GoldVendas": "2026-04-08 18:30:00",
     "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
@@ -96,6 +97,7 @@ Mesma estrutura acima, filtrada por uma associação. Retorna `404` se não houv
       "cnpj": "12345678000199",
       "sit_contrato": "ATIVO",
       "codigo_rede": "80",
+      "num_versao": "4.2.1",
       "ultima_venda_GoldVendas": "2026-04-08",
       "ultima_hora_venda_GoldVendas": "2026-04-08 18:30:00",
       "ultima_venda_SilverSTGN_Dedup": "2026-04-14",
@@ -155,6 +157,7 @@ Mesmo resultado do POST, sem body.
 | `cnpj` | string \| null | `dimensao_cadastro_lojas` ¹ | CNPJ somente dígitos (sem `.` `-` `/`) |
 | `sit_contrato` | string \| null | `dimensao_cadastro_lojas` | Situação do contrato (ex: `"ATIVO"`, `"INATIVO"`) |
 | `codigo_rede` | string \| null | `dimensao_cadastro_lojas` | Código da rede — igual ao código de associação |
+| `num_versao` | string \| null | `associacao.versoes_coletor` | Versão do coletor instalado na farmácia |
 | `ultima_venda_GoldVendas` | string \| null | `associacao.vendas` | Data da última venda (formato `YYYY-MM-DD`) |
 | `ultima_hora_venda_GoldVendas` | string \| null | `associacao.vendas` | Hora da última venda |
 | `ultima_venda_SilverSTGN_Dedup` | string \| null | `silver.cadcvend_staging_dedup` | Data da última venda (formato `YYYY-MM-DD`) |
@@ -182,6 +185,12 @@ Use para filtrar/destacar farmácias inativas no dashboard.
 ### `codigo_rede` — Novidade
 
 Código da rede ao qual a farmácia pertence. Equivale ao código de associação usado na consulta. Pode ser `null` para farmácias presentes somente na Silver sem cadastro na dimensão.
+
+### `num_versao` — Novidade
+
+Versão do coletor instalado na farmácia, obtida de `associacao.versoes_coletor`. Pode ser `null` se a farmácia ainda não tiver registro na tabela de versões.
+
+Use para identificar farmácias com versões desatualizadas do coletor no dashboard.
 
 ### `tipo_divergencia`
 
@@ -239,3 +248,4 @@ CORS_ORIGINS=http://localhost:3000,https://dashboard.suaempresa.com
 | `cnpj` | vinha direto de `associacao.vendas` | vem de `dimensao_cadastro_lojas` (fallback: `cadfilia_staging_dedup`) |
 | `sit_contrato` | ❌ não existia | ✅ novo — de `dimensao_cadastro_lojas` |
 | `codigo_rede` | ❌ não existia | ✅ novo — de `dimensao_cadastro_lojas` |
+| `num_versao` | ❌ não existia | ✅ novo — de `associacao.versoes_coletor` (versão do coletor da farmácia) |

@@ -14,7 +14,8 @@ SELECT
     sit_contrato,
     codigo_rede,
     ultima_venda,
-    ultima_hora_venda
+    ultima_hora_venda,
+    num_versao
 FROM (
     SELECT
         d.cod_farmacia,
@@ -24,6 +25,7 @@ FROM (
         d.codigo_rede,
         v.dat_emissao AS ultima_venda,
         v.dat_hora_emissao AS ultima_hora_venda,
+        vc.num_versao,
         ROW_NUMBER() OVER (
             PARTITION BY d.cod_farmacia
             ORDER BY v.dat_emissao DESC, v.dat_hora_emissao DESC
@@ -32,6 +34,8 @@ FROM (
     LEFT JOIN associacao.vendas v
         ON v.codigo = d.cod_farmacia
         AND v.associacao = %s
+    LEFT JOIN associacao.versoes_coletor vc
+        ON vc.cod_farmacia = d.cod_farmacia
     WHERE d.codigo_rede = %s
 ) sub
 WHERE rn = 1
@@ -73,7 +77,7 @@ def execute_gold_vendas(associacao: str) -> list[dict]:
 
     Returns:
         Lista de dicionários com chaves: cod_farmacia, nome_farmacia, cnpj,
-        sit_contrato, codigo_rede, ultima_venda, ultima_hora_venda
+        sit_contrato, codigo_rede, ultima_venda, ultima_hora_venda, num_versao
     """
     logger.info("⏳ Aguardando resposta Redshift [GoldVendas] — associacao=%s...", associacao)
     t0 = time.perf_counter()
