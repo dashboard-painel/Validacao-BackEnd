@@ -11,8 +11,9 @@ from app.repositories.comparacao_repository import (
 )
 
 from app.mappers.comparacao_mapper import montar_resultado_consolidado
-from app.schemas import ComparacaoRequest, ComparacaoResponse, ResultadoConsolidadoResponse
+from app.schemas import ComparacaoRequest, ComparacaoResponse, ResultadoConsolidadoResponse, VendasParceirosResponse
 from app.services.comparacao_service import executar_comparacao
+from app.services.vendas_parceiros_service import executar_vendas_parceiros as executar_vp
 
 logger = logging.getLogger(__name__)
 
@@ -93,3 +94,17 @@ def coletor_codigo(codigo: str) -> dict:
         raise HTTPException(status_code=503, detail=f"Erro ao acessar o coletor. Detalhes: {type(e).__name__}")
 
     return {"data_hora_ultima_venda": data_hora_ultima_venda}
+
+@router.get("/vendas-parceiros", response_model=VendasParceirosResponse)
+def vendas_parceiros(
+    associacao: str = Query(..., description="Código da associação para filtrar"),
+) -> VendasParceirosResponse:
+    """Consulta vendas_parceiros no Redshift (JOIN com dimensao_cadastro_lojas) e persiste."""
+    try:
+        return executar_vp(associacao)
+    except Exception as e:
+        logger.error("Erro ao executar vendas_parceiros: %s: %s", type(e).__name__, e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Erro de conexão com o banco de dados. Tente novamente em alguns instantes. Detalhes: {type(e).__name__}",
+        )
