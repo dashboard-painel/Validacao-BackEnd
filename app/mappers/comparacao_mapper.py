@@ -8,7 +8,7 @@ from app.schemas import (
 from app.utils import camadas_atrasadas
 
 
-def montar_divergencia_response(d, camadas_atrasadas, camadas_sem_dados) -> DivergenciaResponse:
+def montar_divergencia_response(d, camadas_atrasadas, camadas_sem_dados, classificacao: str | None = None) -> DivergenciaResponse:
     return DivergenciaResponse(
         cod_farmacia=d.cod_farmacia,
         nome_farmacia=d.nome_farmacia,
@@ -23,6 +23,7 @@ def montar_divergencia_response(d, camadas_atrasadas, camadas_sem_dados) -> Dive
         tipo_divergencia=d.tipo_divergencia,
         camadas_atrasadas=camadas_atrasadas,
         camadas_sem_dados=camadas_sem_dados,
+        classificacao=classificacao,
     )
 
 
@@ -73,4 +74,5 @@ def montar_resultado_consolidado(row) -> ResultadoConsolidadoResponse:
         atualizado_em=row.get("atualizado_em"),
         camadas_atrasadas=c_atrasadas,
         camadas_sem_dados=c_sem_dados,
+        classificacao=row.get("classificacao"),
     )

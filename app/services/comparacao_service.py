@@ -1,11 +1,14 @@
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from app.clients.coletor_bi import buscar_por_associacao
 from app.models.comparacao import Divergencia, ResultadoComparacao
 
 from app.repositories.comparacao_repository import (
     buscar_status_farmacias,
+    buscar_classificacao_farmacias,
+    buscar_versoes_farmacias,
     salvar_comparacao,
     salvar_status_farmacias,
 )
@@ -149,39 +152,71 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
     # 1. Comparação Redshift
     resultado = _comparar_resultados(associacao)
 
-    # 2. Business Connect
-    logger.info("⏳ Buscando status Business Connect (%d farmácias)", len(resultado.todas_farmacias))
-    t_bc = time.perf_counter()
+    # 2. Business Connect + Coletor BI + Sicfarma em paralelo
+    logger.info(
+        "⏳ Buscando status Business Connect, Coletor BI e Sicfarma em paralelo (%d farmácias)",
+        len(resultado.todas_farmacias),
+    )
+    t_parallel = time.perf_counter()
 
-    try:
-        status_dict = buscar_status_farmacias(list(resultado.todas_farmacias))
-        logger.info("✅ Business Connect respondeu em %.2fs", time.perf_counter() - t_bc)
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_bc = executor.submit(buscar_status_farmacias, list(resultado.todas_farmacias))
+        future_coletor = executor.submit(buscar_por_associacao, list(resultado.todas_farmacias))
+        future_sicfarma = executor.submit(buscar_classificacao_farmacias, list(resultado.todas_farmacias))
+        future_versoes = executor.submit(buscar_versoes_farmacias, list(resultado.todas_farmacias))
 
-    except Exception as e:
-        logger.warning(
-            "Business Connect indisponível (%.2fs): %s: %s",
-            time.perf_counter() - t_bc,
-            type(e).__name__,
-            e,
-        )
-        status_dict = {cod: "Indisponível" for cod in resultado.todas_farmacias}
+        try:
+            status_dict = future_bc.result()
+        except Exception as e:
+            logger.warning(
+                "Business Connect indisponível (%.2fs): %s: %s",
+                time.perf_counter() - t_parallel,
+                type(e).__name__,
+                e,
+            )
+            status_dict = {cod: "Indisponível" for cod in resultado.todas_farmacias}
 
-    # 3. Coletor BI
-    logger.info("⏳ Buscando status Coletor BI (%d farmácias)", len(resultado.todas_farmacias))
-    t_coletor = time.perf_counter()
+        try:
+            resultado_coletor = future_coletor.result()
+        except Exception as e:
+            logger.warning(
+                "Coletor BI indisponivel (%.2fs): %s: %s",
+                time.perf_counter() - t_parallel,
+                type(e).__name__,
+                e,
+            )
+            resultado_coletor = {}
 
-    try:
-        resultado_coletor = buscar_por_associacao(list(resultado.todas_farmacias))
-        logger.info("✅ Coletor BI respondeu em %.2fs", time.perf_counter() - t_coletor)
+        try:
+            classificacao_dict = future_sicfarma.result()
+        except Exception as e:
+            logger.warning(
+                "Sicfarma indisponível (%.2fs): %s: %s",
+                time.perf_counter() - t_parallel,
+                type(e).__name__,
+                e,
+            )
+            classificacao_dict = {cod: None for cod in resultado.todas_farmacias}
 
-    except Exception as e:
-        logger.warning(
-            "Coletor BI indisponivel (%.2fs): %s: %s",
-            time.perf_counter() - t_coletor,
-            type(e).__name__,
-            e,
-        )
-        resultado_coletor = {cod: "Indisponivel" for cod in resultado.todas_farmacias}
+        try:
+            versoes_dict = future_versoes.result()
+        except Exception as e:
+            logger.warning(
+                "Sicfarma /versoes indisponível (%.2fs): %s: %s",
+                time.perf_counter() - t_parallel,
+                type(e).__name__,
+                e,
+            )
+            versoes_dict = {cod: None for cod in resultado.todas_farmacias}
+
+    logger.info("✅ APIs externas consultadas em %.2fs", time.perf_counter() - t_parallel)
+
+    # Aplicar num_versao do Sicfarma nas divergências e nos resultados gold (antes de persistir)
+    for d in resultado.divergencias:
+        d.num_versao = versoes_dict.get(d.cod_farmacia)
+    for r in resultado.resultados_gold_vendas:
+        cod = str(r.get("cod_farmacia", "")).strip()
+        r["num_versao"] = versoes_dict.get(cod)
 
     # 4. Persistência
     try:
@@ -213,7 +248,7 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
     # 5. Persistir status Business Connect + Coletor BI
     if resultado.comparacao_id is not None:
         try:
-            salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict, resultado_coletor)
+            salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict, resultado_coletor, classificacao_dict)
         except Exception as e:
             logger.warning("Erro ao salvar status_farmacias: %s: %s", type(e).__name__, e)
 
@@ -225,7 +260,8 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
             d.ultima_venda_SilverSTGN_Dedup,
             status_dict.get(d.cod_farmacia),
         )
-        divergencias.append(montar_divergencia_response(d, c_atrasadas, c_sem_dados))
+        classificacao = classificacao_dict.get(d.cod_farmacia)
+        divergencias.append(montar_divergencia_response(d, c_atrasadas, c_sem_dados, classificacao))
 
     # 7. Status farmácias
     todas_farmacias = set(status_dict.keys()) | set(resultado_coletor.keys())

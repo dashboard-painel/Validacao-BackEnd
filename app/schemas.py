@@ -58,6 +58,7 @@ class DivergenciaResponse(BaseModel):
         None,
         description="Camadas sem nenhum registro de venda: 'GoldVendas', 'SilverSTGN_Dedup'",
     )
+    classificacao: Optional[str] = Field(None, description="Classificação Sicfarma da farmácia (ex: GOLD, PRIME, SELECT1)")
 
     model_config = {
         "json_schema_extra": {
@@ -118,6 +119,7 @@ class ResultadoConsolidadoResponse(BaseModel):
         None,
         description="Camadas sem nenhum registro de venda: 'GoldVendas', 'SilverSTGN_Dedup'",
     )
+    classificacao: Optional[str] = Field(None, description="Classificação Sicfarma da farmácia (ex: GOLD, PRIME, SELECT1)")
     atualizado_em: Optional[datetime] = Field(
         None,
         description="Data/hora em que esta comparação foi executada",
