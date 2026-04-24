@@ -31,3 +31,4 @@ class ResultadoComparacao:
     todas_farmacias: set = field(default_factory=set)
     resultados_gold_vendas: list[dict] = field(default_factory=list)
     resultados_silver_stgn_dedup: list[dict] = field(default_factory=list)
+

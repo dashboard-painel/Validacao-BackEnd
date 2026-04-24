@@ -79,12 +79,26 @@ def init_local_db():
                     ultima_hora_venda_GoldVendas TIMESTAMP,
                     ultima_venda_SilverSTGN_Dedup DATE,
                     ultima_hora_venda_SilverSTGN_Dedup TIME,
+                    dat_hora_emissao_vendas_parceiros TIMESTAMP,
                     tipo_divergencia VARCHAR(50),
                     coletor_novo TEXT,
                     coletor_bi_ultima_data DATE,
                     coletor_bi_ultima_hora TIME,
                     num_versao VARCHAR(50),
                     UNIQUE (codigo_rede, cod_farmacia)
+                );
+
+                CREATE TABLE IF NOT EXISTS resultados_vendas_parceiros (
+                    id SERIAL PRIMARY KEY,
+                    associacao VARCHAR(100) NOT NULL,
+                    cod_farmacia VARCHAR(50) NOT NULL,
+                    nome_farmacia VARCHAR(255),
+                    sit_contrato VARCHAR(50),
+                    farmacia VARCHAR(100),
+                    associacao_parceiro VARCHAR(100),
+                    ultima_venda_parceiros TIMESTAMP,
+                    atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (associacao, cod_farmacia)
                 );
             """)
             # Migração: garante colunas e remove duplicação em tabelas já existentes
@@ -94,6 +108,17 @@ def init_local_db():
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS sit_contrato VARCHAR(50)")
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS codigo_rede VARCHAR(50)")
             cur.execute("ALTER TABLE farmacias DROP COLUMN IF EXISTS associacao")
+            cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS dat_hora_emissao_vendas_parceiros TIMESTAMP")
+            cur.execute("ALTER TABLE comparacoes ADD COLUMN IF NOT EXISTS total_vendas_parceiros INTEGER DEFAULT 0")
+            # Migração: repurpose resultados_vendas_parceiros com novas colunas
+            cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS nome_farmacia VARCHAR(255)")
+            cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS sit_contrato VARCHAR(50)")
+            cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS farmacia VARCHAR(100)")
+            cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS associacao_parceiro VARCHAR(100)")
+            cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS ultima_venda_parceiros TIMESTAMP")
+            cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            cur.execute("ALTER TABLE resultados_vendas_parceiros DROP COLUMN IF EXISTS comparacao_id")
+            cur.execute("ALTER TABLE resultados_vendas_parceiros DROP COLUMN IF EXISTS dat_hora_emissao_vendas_parceiros")
             cur.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_resultados_gold_vendas_rede_cod
                 ON resultados_gold_vendas (codigo_rede, cod_farmacia)
@@ -127,6 +152,7 @@ def salvar_comparacao(
     Returns:
         int: ID da nova comparação criada em comparacoes
     """
+
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             # Nova linha a cada rodada — histórico de execuções
@@ -253,6 +279,15 @@ def buscar_ultima_atualizacao() -> Optional[str]:
             return row[0] if row else None
 
 
+def buscar_ultima_atualizacao_vendas_parceiros() -> Optional[str]:
+    """Retorna a data/hora da atualização mais recente de vendas_parceiros."""
+    with get_local_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(atualizado_em)::text FROM resultados_vendas_parceiros")
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
 def buscar_todos_consolidados() -> list[dict]:
     """Retorna todas as farmácias de todas as associações (dados da última rodada de cada uma)."""
     with get_local_connection() as conn:
@@ -270,6 +305,7 @@ def buscar_todos_consolidados() -> list[dict]:
                     f.ultima_hora_venda_GoldVendas::text,
                     f.ultima_venda_SilverSTGN_Dedup::text,
                     f.ultima_hora_venda_SilverSTGN_Dedup::text,
+                    f.dat_hora_emissao_vendas_parceiros::text,
                     f.tipo_divergencia,
                     f.coletor_novo,
                     f.coletor_bi_ultima_data::text,
@@ -299,6 +335,7 @@ def buscar_historico_por_associacao(associacao: str) -> list[dict]:
                     f.ultima_hora_venda_GoldVendas::text,
                     f.ultima_venda_SilverSTGN_Dedup::text,
                     f.ultima_hora_venda_SilverSTGN_Dedup::text,
+                    f.dat_hora_emissao_vendas_parceiros::text,
                     f.tipo_divergencia,
                     f.coletor_novo,
                     f.coletor_bi_ultima_data::text,
@@ -342,3 +379,62 @@ def salvar_status_farmacias(
                     cod_farmacia,
                 ))
         conn.commit()
+
+
+def salvar_vendas_parceiros(resultados: list[dict]) -> int:
+    """Persiste resultados de vendas_parceiros no PostgreSQL local via UPSERT."""
+    with get_local_connection() as conn:
+        with conn.cursor() as cur:
+            # Limpa registros antigos que não estão mais no resultado
+            novos_keys = {
+                (str(r.get("associacao", "")).strip(), str(r["cod_farmacia"]).strip())
+                for r in resultados
+            }
+            if novos_keys:
+                cur.execute("DELETE FROM resultados_vendas_parceiros")
+
+            for r in resultados:
+                assoc = str(r.get("associacao", "")).strip()
+                cur.execute("""
+                    INSERT INTO resultados_vendas_parceiros
+                        (associacao, cod_farmacia, nome_farmacia, sit_contrato,
+                         farmacia, associacao_parceiro, ultima_venda_parceiros, atualizado_em)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON CONFLICT (associacao, cod_farmacia) DO UPDATE
+                        SET nome_farmacia        = EXCLUDED.nome_farmacia,
+                            sit_contrato         = EXCLUDED.sit_contrato,
+                            farmacia             = EXCLUDED.farmacia,
+                            associacao_parceiro   = EXCLUDED.associacao_parceiro,
+                            ultima_venda_parceiros = EXCLUDED.ultima_venda_parceiros,
+                            atualizado_em        = CURRENT_TIMESTAMP
+                """, (
+                    assoc,
+                    str(r["cod_farmacia"]).strip(),
+                    r.get("nome_farmacia"),
+                    r.get("sit_contrato"),
+                    r.get("farmacia"),
+                    r.get("associacao_parceiro"),
+                    r.get("ultima_venda_parceiros"),
+                ))
+        conn.commit()
+        return len(resultados)
+
+
+def buscar_vendas_parceiros() -> list[dict]:
+    """Retorna todos os resultados de vendas_parceiros persistidos."""
+    with get_local_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("""
+                SELECT
+                    associacao,
+                    cod_farmacia,
+                    nome_farmacia,
+                    sit_contrato,
+                    farmacia,
+                    associacao_parceiro,
+                    ultima_venda_parceiros::text,
+                    atualizado_em::text
+                FROM resultados_vendas_parceiros
+                ORDER BY ultima_venda_parceiros DESC
+            """)
+            return [dict(row) for row in cur.fetchall()]
