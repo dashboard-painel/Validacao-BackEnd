@@ -109,6 +109,7 @@ def init_local_db():
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS codigo_rede VARCHAR(50)")
             cur.execute("ALTER TABLE farmacias DROP COLUMN IF EXISTS associacao")
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS dat_hora_emissao_vendas_parceiros TIMESTAMP")
+            cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS num_versao VARCHAR(50)")
             cur.execute("ALTER TABLE comparacoes ADD COLUMN IF NOT EXISTS total_vendas_parceiros INTEGER DEFAULT 0")
             # Migração: repurpose resultados_vendas_parceiros com novas colunas
             cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS nome_farmacia VARCHAR(255)")
