@@ -31,8 +31,8 @@ FROM (
     FROM associacao.dimensao_cadastro_lojas d
     LEFT JOIN associacao.vendas v
         ON v.codigo = d.cod_farmacia
-        AND v.associacao = 94
-    WHERE d.codigo_rede = 94
+        AND v.associacao = %s
+    WHERE d.codigo_rede = %s
     AND d.sistema = 'TRIER' -- filtro para remover farmacias parceiras
 ) sub
 WHERE rn = 1
