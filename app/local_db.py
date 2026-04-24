@@ -265,7 +265,7 @@ def salvar_comparacao(
                     r_silver.get("ultima_venda") if r_silver else None,
                     r_silver.get("ultima_hora_venda") if r_silver else None,
                     div.get("tipo_divergencia"),
-                    r_gold.get("num_versao") if r_gold else None,
+                    div.get("num_versao") or (r_gold.get("num_versao") if r_gold else None),
                 ))
 
         conn.commit()
