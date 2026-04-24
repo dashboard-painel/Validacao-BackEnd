@@ -20,21 +20,25 @@ logger = logging.getLogger(__name__)
 COD_SISTEMA_COLETOR = 21
 
 _RETRY_CONFIG = Retry(
-    total=2,
-    read=0,
+    total=3,
+    read=1,
     backoff_factor=1.0,
     status_forcelist={500, 502, 503, 504},
     allowed_methods={"GET"},
     raise_on_status=False,
 )
 
+_SESSION = requests.Session()
+_SESSION.mount("https://", HTTPAdapter(max_retries=_RETRY_CONFIG, pool_connections=1, pool_maxsize=25))
+_SESSION.mount("http://", HTTPAdapter(max_retries=_RETRY_CONFIG, pool_connections=1, pool_maxsize=25))
+
 
 def _get_with_retry(url: str, **kwargs) -> requests.Response:
-    """GET com até 2 retentativas automáticas em erros 5xx (backoff: 1s, 2s)."""
-    session = requests.Session()
-    session.mount("https://", HTTPAdapter(max_retries=_RETRY_CONFIG))
-    session.mount("http://", HTTPAdapter(max_retries=_RETRY_CONFIG))
-    return session.get(url, **kwargs)
+    """GET com até 2 retentativas automáticas em erros 5xx (backoff: 1s, 2s).
+
+    Usa session compartilhada para reutilizar conexões e evitar overhead de SSL por chamada.
+    """
+    return _SESSION.get(url, **kwargs)
 
 _SICFARMA_CLASSIFICATION_MAP: dict[int, str] = {
     1: "GOLD",
@@ -70,9 +74,9 @@ def buscar_classificacao_por_codigo(cod_farmacia: str) -> str | None:
             auth=(SICFARMA_USERNAME, SICFARMA_PASSWORD),
             timeout=10,
         )
-    except Exception:
+    except Exception as e:
         logger.warning(
-            "Sicfarma request falhou para farmácia %s: timeout ou erro de conexão", cod_farmacia
+            "Sicfarma request falhou para farmácia %s: %s", cod_farmacia, e
         )
         return None
 
@@ -86,8 +90,8 @@ def buscar_classificacao_por_codigo(cod_farmacia: str) -> str | None:
 
     try:
         dados = response.json()
-    except Exception:
-        logger.warning("Sicfarma resposta inválida (JSON) para farmácia %s", cod_farmacia)
+    except Exception as e:
+        logger.warning("Sicfarma resposta inválida (JSON) para farmácia %s: %s", cod_farmacia, e)
         return None
 
     if isinstance(dados, list):
@@ -136,9 +140,9 @@ def buscar_versao_por_codigo(cod_farmacia: str) -> str | None:
             auth=(SICFARMA_USERNAME, SICFARMA_PASSWORD),
             timeout=10,
         )
-    except Exception:
+    except Exception as e:
         logger.warning(
-            "Sicfarma /versoes request falhou para farmácia %s: timeout ou erro de conexão", cod_farmacia
+            "Sicfarma /versoes request falhou para farmácia %s: %s", cod_farmacia, e
         )
         return None
 
@@ -152,8 +156,8 @@ def buscar_versao_por_codigo(cod_farmacia: str) -> str | None:
 
     try:
         dados = response.json()
-    except Exception:
-        logger.warning("Sicfarma /versoes resposta inválida (JSON) para farmácia %s", cod_farmacia)
+    except Exception as e:
+        logger.warning("Sicfarma /versoes resposta inválida (JSON) para farmácia %s: %s", cod_farmacia, e)
         return None
 
     if not isinstance(dados, list):
@@ -180,7 +184,7 @@ def buscar_versoes_farmacias(codigos: list[str]) -> dict[str, str | None]:
         return {}
 
     t_inicio = time.perf_counter()
-    logger.info("⏳ Consultando versão coletor Sicfarma para %d farmácias (paralelo)...", len(codigos))
+    logger.info("⏳ Consultando versão coletor Sicfarma para %d farmácias...", len(codigos))
 
     resultado: dict[str, str | None] = {}
 
@@ -194,7 +198,7 @@ def buscar_versoes_farmacias(codigos: list[str]) -> dict[str, str | None]:
                 logger.warning("Sicfarma /versoes falhou para farmácia %s: %s", cod, e)
                 resultado[cod] = None
 
-    logger.info("✅ Sicfarma /versoes consultado em %.2fs", time.perf_counter() - t_inicio)
+    logger.info("✅ Sicfarma /versoes — %d farmácias consultadas em %.2fs", len(resultado), time.perf_counter() - t_inicio)
     return resultado
 
 
@@ -211,7 +215,7 @@ def buscar_classificacao_farmacias(codigos: list[str]) -> dict[str, str | None]:
         return {}
 
     t_inicio = time.perf_counter()
-    logger.info("⏳ Consultando classificação Sicfarma para %d farmácias (paralelo)...", len(codigos))
+    logger.info("⏳ Consultando classificação Sicfarma para %d farmácias...", len(codigos))
 
     resultado: dict[str, str | None] = {}
 
@@ -225,5 +229,5 @@ def buscar_classificacao_farmacias(codigos: list[str]) -> dict[str, str | None]:
                 logger.warning("Sicfarma classificação falhou para farmácia %s: %s", cod, e)
                 resultado[cod] = None
 
-    logger.info("✅ Sicfarma consultado em %.2fs", time.perf_counter() - t_inicio)
+    logger.info("✅ Sicfarma — %d farmácias consultadas em %.2fs", len(resultado), time.perf_counter() - t_inicio)
     return resultado
