@@ -106,10 +106,14 @@ def _comparar_resultados(associacao: str) -> ResultadoComparacao:
                 tipo_divergencia="apenas_silver_stgn_dedup",
             ))
         else:
-            venda_gold = str(r_gold.get("ultima_venda")) if r_gold.get("ultima_venda") else None
-            venda_silver = str(r_silver.get("ultima_venda")) if r_silver.get("ultima_venda") else None
+            venda_gold = str(r_gold.get("ultima_venda")) if r_gold and r_gold.get("ultima_venda") else None
+            venda_silver = str(r_silver.get("ultima_venda")) if r_silver and r_silver.get("ultima_venda") else None
 
             if venda_gold != venda_silver:
+                nome = r_gold.get("nome_farmacia") if r_gold else None
+                cnpj = r_gold.get("cnpj") if r_gold else None
+                sit_contrato = r_gold.get("sit_contrato") if r_gold else None
+                codigo_rede = r_gold.get("codigo_rede") if r_gold else None
                 divergencias.append(Divergencia(
                     cod_farmacia=cod,
                     nome_farmacia=r_gold.get("nome_farmacia"),
@@ -118,9 +122,9 @@ def _comparar_resultados(associacao: str) -> ResultadoComparacao:
                     codigo_rede=r_gold.get("codigo_rede"),
                     num_versao=r_gold.get("num_versao"),
                     ultima_venda_GoldVendas=venda_gold,
-                    ultima_hora_venda_GoldVendas=str(r_gold.get("ultima_hora_venda")) if r_gold.get("ultima_hora_venda") else None,
+                    ultima_hora_venda_GoldVendas=str(r_gold.get("ultima_hora_venda")) if r_gold and r_gold.get("ultima_hora_venda") else None,
                     ultima_venda_SilverSTGN_Dedup=venda_silver,
-                    ultima_hora_venda_SilverSTGN_Dedup=str(r_silver.get("ultima_hora_venda")) if r_silver.get("ultima_hora_venda") else None,
+                    ultima_hora_venda_SilverSTGN_Dedup=str(r_silver.get("ultima_hora_venda")) if r_silver and r_silver.get("ultima_hora_venda") else None,
                     tipo_divergencia="data_diferente",
                 ))
 

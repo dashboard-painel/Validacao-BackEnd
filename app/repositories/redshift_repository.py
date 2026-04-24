@@ -62,6 +62,28 @@ WHERE rn = 1
 ORDER BY ultima_venda DESC, ultima_hora_venda DESC;
 """
 
+QUERY_VENDAS_PARCEIROS = """
+SELECT
+    dmj.cod_farmacia,
+    dmj.nom_farmacia AS nome_farmacia,
+    dmj.sit_contrato,
+    dmj.codigo_rede AS associacao,
+    vp.farmacia,
+    vp.associacao AS associacao_parceiro,
+    MAX(vp.dat_hora_emissao) AS ultima_venda_parceiros
+FROM associacao.vendas_parceiros vp
+JOIN associacao.dimensao_cadastro_lojas dmj
+    ON dmj.num_cnpj = vp.num_cnpj
+GROUP BY
+    dmj.cod_farmacia,
+    dmj.nom_farmacia,
+    dmj.sit_contrato,
+    dmj.codigo_rede,
+    vp.farmacia,
+    vp.associacao
+ORDER BY ultima_venda_parceiros DESC;
+"""
+
 def execute_gold_vendas(associacao: str) -> list[dict]:
     """Executa a query na tabela associacao.vendas (GoldVendas) no Redshift.
 
@@ -213,4 +235,26 @@ def execute_silver_stgn_dedup(associacao: str) -> list[dict]:
         rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
     elapsed = time.perf_counter() - t0
     logger.info("✅ Redshift [SilverSTGN_Dedup] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
+    return rows
+
+
+def execute_vendas_parceiros() -> list[dict]:
+    """Executa a query de vendas_parceiros JOIN dimensao_cadastro_lojas no Redshift.
+
+    Retorna dados cadastrais da farmácia + última venda em vendas_parceiros,
+    cruzando pelo CNPJ entre as tabelas. Sem filtro — traz todas as redes.
+
+    Returns:
+        Lista de dicionários com chaves: cod_farmacia, nome_farmacia, sit_contrato,
+        associacao, farmacia, associacao_parceiro, ultima_venda_parceiros
+    """
+    logger.info("⏳ Aguardando resposta Redshift [VendasParceiros]...")
+    t0 = time.perf_counter()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(QUERY_VENDAS_PARCEIROS)
+        column_names = [desc[0] for desc in cursor.description]
+        rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
+    elapsed = time.perf_counter() - t0
+    logger.info("✅ Redshift [VendasParceiros] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
     return rows
