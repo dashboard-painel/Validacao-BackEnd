@@ -85,7 +85,7 @@ def buscar_por_associacao(codigos: list[str]) -> dict[str, dict]:
 
     resultado: dict[str, dict] = {}
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {
             executor.submit(buscar_por_codigo, codigo): codigo
             for codigo in codigos

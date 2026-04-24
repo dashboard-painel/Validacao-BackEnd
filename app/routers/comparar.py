@@ -1,4 +1,5 @@
 """Router para endpoint de comparação de dados."""
+import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -20,12 +21,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["comparação"])
 
+# Limita a 1 comparação pesada por vez; requests extras aguardam na fila
+_comparar_semaphore = asyncio.Semaphore(1)
+
 @router.get("/comparar", response_model=ComparacaoResponse)
-def comparar(
+async def comparar(
     associacao: str = Query(..., description="Código da associação para filtrar"),
 ) -> ComparacaoResponse:
     try:
-        return executar_comparacao(associacao)
+        async with _comparar_semaphore:
+            return await asyncio.to_thread(executar_comparacao, associacao)
     except Exception as e:
         logger.error("Erro ao executar comparação: %s: %s", type(e).__name__, e)
         raise HTTPException(
@@ -34,9 +39,10 @@ def comparar(
         )
 
 @router.post("/comparar", response_model=ComparacaoResponse)
-def comparar_post(body: ComparacaoRequest) -> ComparacaoResponse:
+async def comparar_post(body: ComparacaoRequest) -> ComparacaoResponse:
     try:
-        return executar_comparacao(body.associacao)
+        async with _comparar_semaphore:
+            return await asyncio.to_thread(executar_comparacao, body.associacao)
     except Exception as e:
         logger.error("Erro ao executar comparação: %s: %s", type(e).__name__, e)
         raise HTTPException(
@@ -97,10 +103,11 @@ def coletor_codigo(codigo: str) -> dict:
     return {"data_hora_ultima_venda": data_hora_ultima_venda}
 
 @router.get("/vendas-parceiros", response_model=VendasParceirosResponse)
-def vendas_parceiros() -> VendasParceirosResponse:
+async def vendas_parceiros() -> VendasParceirosResponse:
     """Consulta vendas_parceiros no Redshift (JOIN com dimensao_cadastro_lojas) e persiste."""
     try:
-        return executar_vp()
+        async with _comparar_semaphore:
+            return await asyncio.to_thread(executar_vp)
     except Exception as e:
         logger.error("Erro ao executar vendas_parceiros: %s: %s", type(e).__name__, e)
         raise HTTPException(

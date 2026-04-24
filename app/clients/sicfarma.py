@@ -188,7 +188,7 @@ def buscar_versoes_farmacias(codigos: list[str]) -> dict[str, str | None]:
 
     resultado: dict[str, str | None] = {}
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(buscar_versao_por_codigo, cod): cod for cod in codigos}
         for future in as_completed(futures):
             cod = futures[future]
@@ -219,7 +219,7 @@ def buscar_classificacao_farmacias(codigos: list[str]) -> dict[str, str | None]:
 
     resultado: dict[str, str | None] = {}
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(buscar_classificacao_por_codigo, cod): cod for cod in codigos}
         for future in as_completed(futures):
             cod = futures[future]
