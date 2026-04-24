@@ -98,7 +98,7 @@ def execute_gold_vendas(associacao: str) -> list[dict]:
         Lista de dicionários com chaves: cod_farmacia, nome_farmacia, cnpj,
         sit_contrato, codigo_rede, ultima_venda, ultima_hora_venda
     """
-    logger.info("⏳ Aguardando resposta Redshift [GoldVendas] — associacao=%s...", associacao)
+    logger.info("⏳ Aguardando resposta Redshift [associacao.vendas] — associacao=%s...", associacao)
     t0 = time.perf_counter()
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -106,7 +106,7 @@ def execute_gold_vendas(associacao: str) -> list[dict]:
         column_names = [desc[0] for desc in cursor.description]
         rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
     elapsed = time.perf_counter() - t0
-    logger.info("✅ Redshift [GoldVendas] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
+    logger.info("✅ Redshift [associacao.vendas] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
     return rows
 
 
@@ -226,7 +226,7 @@ def execute_silver_stgn_dedup(associacao: str) -> list[dict]:
         Lista de dicionários com chaves: cod_farmacia, ultima_venda,
         ultima_hora_venda
     """
-    logger.info("⏳ Aguardando resposta Redshift [SilverSTGN_Dedup] — associacao=%s...", associacao)
+    logger.info("⏳ Aguardando resposta Redshift [silver.cadcvend_staging_dedup] — associacao=%s...", associacao)
     t0 = time.perf_counter()
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -234,7 +234,7 @@ def execute_silver_stgn_dedup(associacao: str) -> list[dict]:
         column_names = [desc[0] for desc in cursor.description]
         rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
     elapsed = time.perf_counter() - t0
-    logger.info("✅ Redshift [SilverSTGN_Dedup] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
+    logger.info("✅ Redshift [silver.cadcvend_staging_dedup] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
     return rows
 
 
@@ -248,7 +248,7 @@ def execute_vendas_parceiros() -> list[dict]:
         Lista de dicionários com chaves: cod_farmacia, nome_farmacia, sit_contrato,
         associacao, farmacia, associacao_parceiro, ultima_venda_parceiros
     """
-    logger.info("⏳ Aguardando resposta Redshift [VendasParceiros]...")
+    logger.info("⏳ Aguardando resposta Redshift [associacao.vendas_parceiros]...")
     t0 = time.perf_counter()
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -256,5 +256,5 @@ def execute_vendas_parceiros() -> list[dict]:
         column_names = [desc[0] for desc in cursor.description]
         rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
     elapsed = time.perf_counter() - t0
-    logger.info("✅ Redshift [VendasParceiros] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
+    logger.info("✅ Redshift [associacao.vendas_parceiros] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
     return rows
