@@ -272,6 +272,15 @@ def buscar_ultima_atualizacao() -> Optional[str]:
             return row[0] if row else None
 
 
+def buscar_ultima_atualizacao_vendas_parceiros() -> Optional[str]:
+    """Retorna a data/hora da atualização mais recente de vendas_parceiros."""
+    with get_local_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT MAX(atualizado_em)::text FROM resultados_vendas_parceiros")
+            row = cur.fetchone()
+            return row[0] if row else None
+
+
 def buscar_todos_consolidados() -> list[dict]:
     """Retorna todas as farmácias de todas as associações (dados da última rodada de cada uma)."""
     with get_local_connection() as conn:
@@ -363,20 +372,20 @@ def salvar_status_farmacias(
         conn.commit()
 
 
-def salvar_vendas_parceiros(associacao: str, resultados: list[dict]) -> int:
+def salvar_vendas_parceiros(resultados: list[dict]) -> int:
     """Persiste resultados de vendas_parceiros no PostgreSQL local via UPSERT."""
     with get_local_connection() as conn:
         with conn.cursor() as cur:
-            novos_cods = {str(r["cod_farmacia"]).strip() for r in resultados}
-            if novos_cods:
-                cur.execute(
-                    "DELETE FROM resultados_vendas_parceiros WHERE associacao = %s AND cod_farmacia <> ALL(%s)",
-                    (associacao, list(novos_cods)),
-                )
-            else:
-                cur.execute("DELETE FROM resultados_vendas_parceiros WHERE associacao = %s", (associacao,))
+            # Limpa registros antigos que não estão mais no resultado
+            novos_keys = {
+                (str(r.get("associacao", "")).strip(), str(r["cod_farmacia"]).strip())
+                for r in resultados
+            }
+            if novos_keys:
+                cur.execute("DELETE FROM resultados_vendas_parceiros")
 
             for r in resultados:
+                assoc = str(r.get("associacao", "")).strip()
                 cur.execute("""
                     INSERT INTO resultados_vendas_parceiros
                         (associacao, cod_farmacia, nome_farmacia, sit_contrato,
@@ -390,7 +399,7 @@ def salvar_vendas_parceiros(associacao: str, resultados: list[dict]) -> int:
                             ultima_venda_parceiros = EXCLUDED.ultima_venda_parceiros,
                             atualizado_em        = CURRENT_TIMESTAMP
                 """, (
-                    associacao,
+                    assoc,
                     str(r["cod_farmacia"]).strip(),
                     r.get("nome_farmacia"),
                     r.get("sit_contrato"),
@@ -402,8 +411,8 @@ def salvar_vendas_parceiros(associacao: str, resultados: list[dict]) -> int:
         return len(resultados)
 
 
-def buscar_vendas_parceiros(associacao: str) -> list[dict]:
-    """Retorna resultados de vendas_parceiros persistidos para uma associação."""
+def buscar_vendas_parceiros() -> list[dict]:
+    """Retorna todos os resultados de vendas_parceiros persistidos."""
     with get_local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
@@ -417,7 +426,6 @@ def buscar_vendas_parceiros(associacao: str) -> list[dict]:
                     ultima_venda_parceiros::text,
                     atualizado_em::text
                 FROM resultados_vendas_parceiros
-                WHERE associacao = %s
                 ORDER BY ultima_venda_parceiros DESC
-            """, (associacao,))
+            """)
             return [dict(row) for row in cur.fetchall()]

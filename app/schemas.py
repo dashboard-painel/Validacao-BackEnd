@@ -164,7 +164,6 @@ class VendasParceirosItemResponse(BaseModel):
     ultima_venda_parceiros: Optional[str] = Field(None, description="Data/hora da última venda em vendas_parceiros")
 
 class VendasParceirosResponse(BaseModel):
-    """Resultado da consulta de vendas_parceiros para uma associação."""
-    associacao: str = Field(..., description="Código da associação consultada")
+    """Resultado da consulta de vendas_parceiros para todas as redes."""
     total: int = Field(..., ge=0, description="Total de registros retornados")
     resultados: list[VendasParceirosItemResponse] = Field(default_factory=list, description="Lista de registros")

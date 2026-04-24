@@ -9,16 +9,16 @@ from app.schemas import VendasParceirosItemResponse, VendasParceirosResponse
 logger = logging.getLogger(__name__)
 
 
-def executar_vendas_parceiros(associacao: str) -> VendasParceirosResponse:
+def executar_vendas_parceiros() -> VendasParceirosResponse:
     """Executa query vendas_parceiros no Redshift, persiste e retorna resultado."""
-    logger.info("📥 Vendas Parceiros iniciada — associacao=%s", associacao)
+    logger.info("📥 Vendas Parceiros iniciada — buscando todas as redes")
     t0 = time.perf_counter()
 
-    resultados = execute_vendas_parceiros(associacao)
+    resultados = execute_vendas_parceiros()
 
     # Persistência
     try:
-        salvar_vendas_parceiros(associacao, resultados)
+        salvar_vendas_parceiros(resultados)
         logger.info("💾 Vendas Parceiros persistidas — %d registros", len(resultados))
     except Exception as e:
         logger.warning("Erro ao salvar vendas_parceiros (não crítico): %s: %s", type(e).__name__, e)
@@ -29,8 +29,8 @@ def executar_vendas_parceiros(associacao: str) -> VendasParceirosResponse:
             cod_farmacia=str(r["cod_farmacia"]).strip(),
             nome_farmacia=r.get("nome_farmacia"),
             sit_contrato=r.get("sit_contrato"),
-            associacao=str(r.get("associacao", associacao)).strip(),
-            farmacia=r.get("farmacia"),
+            associacao=str(r.get("associacao", "")).strip(),
+            farmacia=str(r["farmacia"]) if r.get("farmacia") is not None else None,
             associacao_parceiro=str(r["associacao_parceiro"]) if r.get("associacao_parceiro") else None,
             ultima_venda_parceiros=str(r["ultima_venda_parceiros"]) if r.get("ultima_venda_parceiros") else None,
         )
@@ -39,7 +39,6 @@ def executar_vendas_parceiros(associacao: str) -> VendasParceirosResponse:
 
     logger.info("🚀 Vendas Parceiros finalizada em %.2fs — %d registros", time.perf_counter() - t0, len(items))
     return VendasParceirosResponse(
-        associacao=associacao,
         total=len(items),
         resultados=items,
     )

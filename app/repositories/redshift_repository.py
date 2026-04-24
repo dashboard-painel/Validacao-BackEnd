@@ -73,7 +73,6 @@ SELECT
 FROM associacao.vendas_parceiros vp
 JOIN associacao.dimensao_cadastro_lojas dmj
     ON dmj.num_cnpj = vp.num_cnpj
-WHERE dmj.codigo_rede = %s
 GROUP BY
     dmj.cod_farmacia,
     dmj.nom_farmacia,
@@ -238,24 +237,21 @@ def execute_silver_stgn_dedup(associacao: str) -> list[dict]:
     return rows
 
 
-def execute_vendas_parceiros(associacao: str) -> list[dict]:
+def execute_vendas_parceiros() -> list[dict]:
     """Executa a query de vendas_parceiros JOIN dimensao_cadastro_lojas no Redshift.
 
     Retorna dados cadastrais da farmácia + última venda em vendas_parceiros,
-    cruzando pelo CNPJ entre as tabelas.
-
-    Args:
-        associacao: Código da rede (codigo_rede) para filtrar
+    cruzando pelo CNPJ entre as tabelas. Sem filtro — traz todas as redes.
 
     Returns:
         Lista de dicionários com chaves: cod_farmacia, nome_farmacia, sit_contrato,
         associacao, farmacia, associacao_parceiro, ultima_venda_parceiros
     """
-    logger.info("⏳ Aguardando resposta Redshift [VendasParceiros] — associacao=%s...", associacao)
+    logger.info("⏳ Aguardando resposta Redshift [VendasParceiros]...")
     t0 = time.perf_counter()
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(QUERY_VENDAS_PARCEIROS, (associacao,))
+        cursor.execute(QUERY_VENDAS_PARCEIROS)
         column_names = [desc[0] for desc in cursor.description]
         rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
     elapsed = time.perf_counter() - t0
