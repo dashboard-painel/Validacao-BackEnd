@@ -2,6 +2,7 @@
 import os
 import re
 from typing import Optional
+from urllib.parse import urlparse
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -50,6 +51,7 @@ def init_local_db():
                     codigo_rede VARCHAR(50),
                     ultima_venda DATE,
                     ultima_hora_venda TIMESTAMP,
+                    num_versao VARCHAR(50),
                     UNIQUE (codigo_rede, cod_farmacia)
                 );
 
@@ -82,6 +84,7 @@ def init_local_db():
                     coletor_novo TEXT,
                     coletor_bi_ultima_data DATE,
                     coletor_bi_ultima_hora TIME,
+                    num_versao VARCHAR(50),
                     UNIQUE (codigo_rede, cod_farmacia)
                 );
 
@@ -173,8 +176,8 @@ def salvar_comparacao(
                 cur.execute("""
                     INSERT INTO resultados_gold_vendas
                         (comparacao_id, cod_farmacia, nome_farmacia, cnpj,
-                         sit_contrato, codigo_rede, ultima_venda, ultima_hora_venda)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                         sit_contrato, codigo_rede, ultima_venda, ultima_hora_venda, num_versao)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (codigo_rede, cod_farmacia) DO UPDATE
                         SET comparacao_id     = EXCLUDED.comparacao_id,
                             nome_farmacia     = EXCLUDED.nome_farmacia,
@@ -182,8 +185,9 @@ def salvar_comparacao(
                             sit_contrato      = EXCLUDED.sit_contrato,
                             codigo_rede       = EXCLUDED.codigo_rede,
                             ultima_venda      = EXCLUDED.ultima_venda,
-                            ultima_hora_venda = EXCLUDED.ultima_hora_venda
-                """, (comparacao_id, r["cod_farmacia"], r.get("nome_farmacia"), r.get("cnpj"), r.get("sit_contrato"), r.get("codigo_rede") or associacao, r.get("ultima_venda"), r.get("ultima_hora_venda")))
+                            ultima_hora_venda = EXCLUDED.ultima_hora_venda,
+                            num_versao        = EXCLUDED.num_versao
+                """, (comparacao_id, r["cod_farmacia"], r.get("nome_farmacia"), r.get("cnpj"), r.get("sit_contrato"), r.get("codigo_rede") or associacao, r.get("ultima_venda"), r.get("ultima_hora_venda"), r.get("num_versao")))
 
             # --- resultados_silver_stgn_dedup ---
             novos_silver = {str(r["cod_farmacia"]).strip() for r in resultados_silver_stgn_dedup}
@@ -233,8 +237,9 @@ def salvar_comparacao(
                          sit_contrato, codigo_rede,
                          ultima_venda_GoldVendas, ultima_hora_venda_GoldVendas,
                          ultima_venda_SilverSTGN_Dedup, ultima_hora_venda_SilverSTGN_Dedup,
-                         tipo_divergencia, coletor_novo, coletor_bi_ultima_data, coletor_bi_ultima_hora)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL)
+                         tipo_divergencia, coletor_novo, coletor_bi_ultima_data, coletor_bi_ultima_hora,
+                         num_versao)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULL, NULL, NULL, %s)
                     ON CONFLICT (codigo_rede, cod_farmacia) DO UPDATE
                         SET comparacao_id                      = EXCLUDED.comparacao_id,
                             nome_farmacia                      = EXCLUDED.nome_farmacia,
@@ -248,7 +253,8 @@ def salvar_comparacao(
                             tipo_divergencia                   = EXCLUDED.tipo_divergencia,
                             coletor_novo                       = NULL,
                             coletor_bi_ultima_data             = NULL,
-                            coletor_bi_ultima_hora             = NULL
+                            coletor_bi_ultima_hora             = NULL,
+                            num_versao                         = EXCLUDED.num_versao
                 """, (
                     comparacao_id, cod, nome, _sanitize_cnpj(cnpj),
                     sit_contrato, codigo_rede,
@@ -257,6 +263,7 @@ def salvar_comparacao(
                     r_silver.get("ultima_venda") if r_silver else None,
                     r_silver.get("ultima_hora_venda") if r_silver else None,
                     div.get("tipo_divergencia"),
+                    r_gold.get("num_versao") if r_gold else None,
                 ))
 
         conn.commit()
@@ -293,6 +300,7 @@ def buscar_todos_consolidados() -> list[dict]:
                     f.cnpj,
                     f.sit_contrato,
                     f.codigo_rede,
+                    f.num_versao,
                     f.ultima_venda_GoldVendas::text,
                     f.ultima_hora_venda_GoldVendas::text,
                     f.ultima_venda_SilverSTGN_Dedup::text,
@@ -322,6 +330,7 @@ def buscar_historico_por_associacao(associacao: str) -> list[dict]:
                     f.cnpj,
                     f.sit_contrato,
                     f.codigo_rede,
+                    f.num_versao,
                     f.ultima_venda_GoldVendas::text,
                     f.ultima_hora_venda_GoldVendas::text,
                     f.ultima_venda_SilverSTGN_Dedup::text,

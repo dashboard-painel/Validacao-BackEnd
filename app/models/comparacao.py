@@ -16,6 +16,7 @@ class Divergencia:
     tipo_divergencia: str  # "data_diferente", "apenas_gold_vendas", "apenas_silver_stgn_dedup"
     sit_contrato: Optional[str] = None
     codigo_rede: Optional[str] = None
+    num_versao: Optional[str] = None
 
 
 @dataclass
