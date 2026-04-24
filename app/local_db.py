@@ -108,6 +108,9 @@ def init_local_db():
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS sit_contrato VARCHAR(50)")
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS codigo_rede VARCHAR(50)")
             cur.execute("ALTER TABLE farmacias DROP COLUMN IF EXISTS associacao")
+<<<<<<< HEAD
+            cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS classificacao VARCHAR(50)")
+=======
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS dat_hora_emissao_vendas_parceiros TIMESTAMP")
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS num_versao VARCHAR(50)")
             cur.execute("ALTER TABLE comparacoes ADD COLUMN IF NOT EXISTS total_vendas_parceiros INTEGER DEFAULT 0")
@@ -120,6 +123,7 @@ def init_local_db():
             cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
             cur.execute("ALTER TABLE resultados_vendas_parceiros DROP COLUMN IF EXISTS comparacao_id")
             cur.execute("ALTER TABLE resultados_vendas_parceiros DROP COLUMN IF EXISTS dat_hora_emissao_vendas_parceiros")
+>>>>>>> main
             cur.execute("""
                 CREATE UNIQUE INDEX IF NOT EXISTS uq_resultados_gold_vendas_rede_cod
                 ON resultados_gold_vendas (codigo_rede, cod_farmacia)
@@ -311,6 +315,7 @@ def buscar_todos_consolidados() -> list[dict]:
                     f.coletor_novo,
                     f.coletor_bi_ultima_data::text,
                     f.coletor_bi_ultima_hora::text,
+                    f.classificacao,
                     c.executado_em::text AS atualizado_em
                 FROM farmacias f
                 LEFT JOIN comparacoes c ON c.id = f.comparacao_id
@@ -341,6 +346,7 @@ def buscar_historico_por_associacao(associacao: str) -> list[dict]:
                     f.coletor_novo,
                     f.coletor_bi_ultima_data::text,
                     f.coletor_bi_ultima_hora::text,
+                    f.classificacao,
                     c.executado_em::text AS atualizado_em
                 FROM farmacias f
                 LEFT JOIN comparacoes c ON c.id = f.comparacao_id
@@ -355,6 +361,7 @@ def salvar_status_farmacias(
     associacao: str,
     status_farmacias: dict[str, str],
     coletor_bi: dict[str, str] | None = None,
+    classificacao_dict: dict[str, str | None] | None = None,
 ) -> None:
     """Atualiza o status dos coletores (Business Connect + Coletor BI) em farmacias."""
     if not status_farmacias:
@@ -379,6 +386,16 @@ def salvar_status_farmacias(
                     associacao,
                     cod_farmacia,
                 ))
+                if classificacao_dict is not None:
+                    cur.execute("""
+                        UPDATE farmacias
+                        SET classificacao = %s
+                        WHERE codigo_rede = %s AND cod_farmacia = %s
+                    """, (
+                        classificacao_dict.get(cod_farmacia),
+                        associacao,
+                        cod_farmacia,
+                    ))
         conn.commit()
 
 

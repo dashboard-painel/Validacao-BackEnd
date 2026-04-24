@@ -150,10 +150,12 @@ curl "http://localhost:8000/historico/123"
 | `ultima_hora_venda_GoldVendas` | string \| null | Hora da última venda em `associacao.vendas` |
 | `ultima_venda_SilverSTGN_Dedup` | string \| null | Última venda em `silver.cadcvend_staging_dedup` |
 | `ultima_hora_venda_SilverSTGN_Dedup` | string \| null | Hora da última venda em `silver.cadcvend_staging_dedup` |
-| `coletor_novo` | string \| null | Status no Business Connect |
-| `tipo_divergencia` | string \| null | Tipo de divergência (`null` = sem divergência) |
 | `camadas_atrasadas` | string[] \| null | Camadas com dado desatualizado (D-2 ou mais antigo) |
 | `camadas_sem_dados` | string[] \| null | Camadas sem nenhum registro de venda |
+| `tipo_divergencia` | string \| null | Tipo de divergência (`null` = sem divergência) |
+| `num_versao` | string \| null | Versão do coletor via Sicfarma `/versoes` (`null` se não encontrado) |
+| `classificacao` | string \| null | Classificação Sicfarma da farmácia (ex: `GOLD`, `PRIME`, `SELECT1`) — `null` se não cadastrada |
+| `coletor_novo` | string \| null | Status no Business Connect |
 | `atualizado_em` | string \| null | Data/hora em que a comparação foi executada |
 
 **Erros:**
@@ -188,6 +190,9 @@ POST /comparar?associacao=X  (ou GET)
        ├─ Redshift [cadfilia/dimensao] → enriquece razão social/CNPJ de farmácias silver-only
        ├─ Comparação por cod_farmacia  → detecta divergências
        ├─ Business Connect (paralelo)  → status de migração de todas as farmácias
+       ├─ Coletor BI (paralelo)        → última venda registrada no Coletor BI
+       ├─ Sicfarma /classificacao (paralelo) → classificação da farmácia (GOLD, PRIME, etc.)
+       ├─ Sicfarma /versoes (paralelo) → versão do coletor instalado (num_versao)
        └─ PostgreSQL local             → UPSERT por (associacao, cod_farmacia); IDs estáveis entre rodadas
 
 GET /historico
@@ -224,6 +229,9 @@ Com a API rodando, acesse:
 | `LOCAL_DB_PASS` | Senha do PostgreSQL local | Não | — |
 | `BC_USERNAME` | Usuário da API Business Connect | Sim | — |
 | `BC_PASSWORD` | Senha da API Business Connect | Sim | — |
+| `SICFARMA_URL` | URL base da API Sicfarma (ex: `.../api/farmacias`) | Sim | — |
+| `SICFARMA_USERNAME` | Usuário da API Sicfarma | Sim | — |
+| `SICFARMA_PASSWORD` | Senha da API Sicfarma | Sim | — |
 | `CORS_ORIGINS` | Origins permitidos para CORS | Não | `*` |
 
 `CORS_ORIGINS` aceita `*` (todas as origens) ou lista separada por vírgulas: `http://localhost:3000,https://app.example.com`

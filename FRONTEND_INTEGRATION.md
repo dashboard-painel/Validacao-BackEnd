@@ -60,6 +60,7 @@ Retorna a data/hora da comparação mais recente entre **todas** as associaçõe
     "tipo_divergencia": "data_diferente",
     "camadas_atrasadas": ["GoldVendas", "API"],
     "camadas_sem_dados": null,
+    "classificacao": "GOLD",
     "atualizado_em": "2026-04-17T10:30:00"
   }
 ]
@@ -104,7 +105,8 @@ Mesma estrutura acima, filtrada por uma associação. Retorna `404` se não houv
       "ultima_hora_venda_SilverSTGN_Dedup": "18:55:10",
       "tipo_divergencia": "data_diferente",
       "camadas_atrasadas": ["GoldVendas"],
-      "camadas_sem_dados": null
+      "camadas_sem_dados": null,
+      "classificacao": "GOLD"
     }
   ],
   "status_farmacias": [
@@ -157,7 +159,7 @@ Mesmo resultado do POST, sem body.
 | `cnpj` | string \| null | `dimensao_cadastro_lojas` ¹ | CNPJ somente dígitos (sem `.` `-` `/`) |
 | `sit_contrato` | string \| null | `dimensao_cadastro_lojas` | Situação do contrato (ex: `"ATIVO"`, `"INATIVO"`) |
 | `codigo_rede` | string \| null | `dimensao_cadastro_lojas` | Código da rede — igual ao código de associação |
-| `num_versao` | string \| null | `associacao.versoes_coletor` | Versão do coletor instalado na farmácia |
+| `num_versao` | string \| null | Sicfarma `/versoes` | Versão do coletor instalado na farmácia |
 | `ultima_venda_GoldVendas` | string \| null | `associacao.vendas` | Data da última venda (formato `YYYY-MM-DD`) |
 | `ultima_hora_venda_GoldVendas` | string \| null | `associacao.vendas` | Hora da última venda |
 | `ultima_venda_SilverSTGN_Dedup` | string \| null | `silver.cadcvend_staging_dedup` | Data da última venda (formato `YYYY-MM-DD`) |
@@ -165,6 +167,7 @@ Mesmo resultado do POST, sem body.
 | `coletor_novo` | string \| null | Business Connect | Status do coletor (ver tabela abaixo) |
 | `coletor_bi_ultima_data` | string \| null | Coletor BI | Data da última venda no Coletor BI |
 | `coletor_bi_ultima_hora` | string \| null | Coletor BI | Hora da última venda no Coletor BI |
+| `classificacao` | string \| null | Sicfarma | Classificação da farmácia (ex: `"GOLD"`, `"PRIME"`) — `null` se não cadastrada ou Sicfarma indisponível |
 | `tipo_divergencia` | string \| null | — | Tipo de divergência (ver tabela abaixo) |
 | `camadas_atrasadas` | string[] \| null | — | Camadas com dado desatualizado (D-2 ou mais antigo) |
 | `camadas_sem_dados` | string[] \| null | — | Camadas sem nenhum registro de venda |
@@ -188,9 +191,26 @@ Código da rede ao qual a farmácia pertence. Equivale ao código de associaçã
 
 ### `num_versao` — Novidade
 
-Versão do coletor instalado na farmácia, obtida de `associacao.versoes_coletor`. Pode ser `null` se a farmácia ainda não tiver registro na tabela de versões.
+Versão do coletor instalado na farmácia, obtida via Sicfarma (`GET {SICFARMA_URL}/versoes?id={cod_farmacia}`, filtrando `codSistema == 21`). Pode ser `null` se a farmácia não tiver registro ou o Sicfarma não responder.
 
 Use para identificar farmácias com versões desatualizadas do coletor no dashboard.
+
+### `classificacao`
+
+Classificação comercial da farmácia conforme cadastro no Sicfarma.
+
+| Valor | Descrição |
+|-------|-----------|
+| `"GOLD"` | Farmácia Gold |
+| `"SELECT1"` | Select nível 1 |
+| `"SELECT2"` | Select nível 2 |
+| `"PRIME"` | Prime |
+| `"NEONATAL"` | Neonatal |
+| `"NEONATAL CLOUD"` | Neonatal Cloud |
+| `"IMPLANTACAO"` | Em implantação |
+| `"100% BRASIL"` | 100% Brasil |
+| `"CLOUD"` | Cloud |
+| `null` | Não cadastrada ou Sicfarma indisponível |
 
 ### `tipo_divergencia`
 
@@ -248,4 +268,4 @@ CORS_ORIGINS=http://localhost:3000,https://dashboard.suaempresa.com
 | `cnpj` | vinha direto de `associacao.vendas` | vem de `dimensao_cadastro_lojas` (fallback: `cadfilia_staging_dedup`) |
 | `sit_contrato` | ❌ não existia | ✅ novo — de `dimensao_cadastro_lojas` |
 | `codigo_rede` | ❌ não existia | ✅ novo — de `dimensao_cadastro_lojas` |
-| `num_versao` | ❌ não existia | ✅ novo — de `associacao.versoes_coletor` (versão do coletor da farmácia) |
+| `num_versao` | de `associacao.versoes_coletor` (Redshift) | ✅ agora via Sicfarma `/versoes` (`codSistema == 21`) |
