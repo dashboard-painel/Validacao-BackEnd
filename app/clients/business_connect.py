@@ -1,4 +1,3 @@
-"""Módulo de integração com a API Business Connect para status de migração."""
 import logging
 import os
 import time
@@ -13,7 +12,7 @@ _BC_BASE_URL = "https://business-connect.triercloud.com.br/v1"
 
 
 def _formatar_data_upload(raw: str) -> str:
-    """Converte data_upload_datalake de ISO para DD/MM/YYYY HH:MM:SS."""
+
     raw = (raw or "").strip()
     if not raw:
         return raw
@@ -54,7 +53,7 @@ def get_bearer_token() -> str:
         )
 
     data = response.json()
-    # A API pode retornar o token sob chaves diferentes — tentamos as mais comuns
+
     token = data.get("access") or data.get("access_token") or data.get("token") or data.get("accessToken")
     if not token:
         raise Exception(
@@ -64,20 +63,7 @@ def get_bearer_token() -> str:
 
 
 def get_status_farmacia(cod_farmacia: str, token: str) -> str:
-    """Consulta o status de migração de uma farmácia no Business Connect.
 
-    Procura na resposta qualquer registro onde table_name == "cadcvend".
-    - Se encontrado: retorna "Pendente de envio no dia {data_upload_datalake}"
-    - Se não encontrado ou farmácia não cadastrada (404): retorna "OK, sem registro"
-    - Se request falhar por outro motivo: loga warning e retorna "OK, sem registro"
-
-    Args:
-        cod_farmacia: Código da farmácia a consultar
-        token: Bearer token obtido via get_bearer_token()
-
-    Returns:
-        str: Texto descritivo do status coletor_novo
-    """
     url = f"{_BC_BASE_URL}/migration/pharmacy/{cod_farmacia}/status"
     try:
         response = requests.get(
@@ -106,7 +92,6 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
         logger.warning("Business Connect resposta inválida para farmácia %s: %s", cod_farmacia, e)
         return "OK, sem registro"
 
-    # Procura registro onde table_name == "cadcvend"
     for registro in registros:
         if isinstance(registro, dict) and registro.get("table_name") == "cadcvend":
             data_upload = registro.get("data_upload_datalake", "")
@@ -116,21 +101,7 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
 
 
 def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
-    """Obtém o status de migração para uma lista de farmácias em paralelo.
 
-    Obtém o Bearer token UMA única vez e reutiliza para todas as consultas.
-    Usa ThreadPoolExecutor para consultar múltiplas farmácias em paralelo.
-    Se a lista de códigos estiver vazia, retorna dict vazio sem fazer requests.
-
-    Args:
-        codigos: Lista de códigos de farmácia a consultar
-
-    Returns:
-        dict[str, str]: Mapeamento {cod_farmacia: coletor_novo}
-
-    Raises:
-        Exception: Se a autenticação falhar (propagado para o caller decidir o fallback)
-    """
     if not codigos:
         return {}
 

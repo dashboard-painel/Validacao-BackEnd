@@ -29,14 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 def _comparar_resultados(associacao: str) -> ResultadoComparacao:
-    """Executa as queries no Redshift e compara os resultados por cod_farmacia.
 
-    Busca a última venda registrada por farmácia em cada fonte (sem filtro de data)
-    e identifica 3 tipos de divergência em ultima_venda:
-    - data_diferente: presente em ambas mas com datas distintas
-    - apenas_gold_vendas: presente somente em associacao.vendas
-    - apenas_silver_stgn_dedup: presente somente em silver.cadcvend_staging_dedup
-    """
     logger.info("🔍 Iniciando comparação — associacao=%s", associacao)
     t_total = time.perf_counter()
 
@@ -138,10 +131,8 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
     logger.info("📥 Comparação iniciada — associacao=%s", associacao)
     t_req = time.perf_counter()
 
-    # 1. Comparação Redshift
     resultado = _comparar_resultados(associacao)
 
-    # 2. Business Connect + Coletor BI + Sicfarma em paralelo
     logger.info(
         "⏳ Buscando status Business Connect, Coletor BI e Sicfarma em paralelo (%d farmácias)",
         len(resultado.todas_farmacias),
@@ -202,14 +193,12 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
 
     logger.info("✅ APIs externas consultadas em %.2fs", time.perf_counter() - t_parallel)
 
-    # Aplicar num_versao do Sicfarma nas divergências e nos resultados gold (antes de persistir)
     for d in resultado.divergencias:
         d.num_versao = versoes_dict.get(d.cod_farmacia)
     for r in resultado.resultados_gold_vendas:
         cod = str(r.get("cod_farmacia", "")).strip()
         r["num_versao"] = versoes_dict.get(cod)
 
-    # 4. Persistência
     try:
         divergencias_dict = [
             {
@@ -236,14 +225,12 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
     except Exception as e:
         logger.warning("Erro ao salvar comparação (não crítico): %s: %s", type(e).__name__, e)
 
-    # 5. Persistir status Business Connect + Coletor BI
     if resultado.comparacao_id is not None:
         try:
             salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict, None, classificacao_dict)  # coletor_bi desativado
         except Exception as e:
             logger.warning("Erro ao salvar status_farmacias: %s: %s", type(e).__name__, e)
 
-    # 6. Montar divergências
     divergencias = []
     for d in resultado.divergencias:
         c_atrasadas, c_sem_dados = camadas_atrasadas(
@@ -254,14 +241,12 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
         classificacao = classificacao_dict.get(d.cod_farmacia)
         divergencias.append(montar_divergencia_response(d, c_atrasadas, c_sem_dados, classificacao))
 
-    # 7. Status farmácias
     todas_farmacias = set(status_dict.keys())  # coletor_bi desativado
     status_farmacias = [
         montar_status_farmacia_response(cod, status_dict.get(cod, "Indisponível"))  # coletor_bi desativado
         for cod in sorted(todas_farmacias)
     ]
 
-    # 8. Response final
     response = montar_comparacao_response(resultado, divergencias, status_farmacias)
 
     logger.info("🚀 Comparação finalizada em %.2fs", time.perf_counter() - t_req)

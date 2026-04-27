@@ -1,4 +1,3 @@
-"""Schemas Pydantic para validação e serialização de respostas da API."""
 from datetime import datetime
 from typing import Optional
 
@@ -6,7 +5,6 @@ from pydantic import BaseModel, Field
 
 
 class AssociacaoResumoResponse(BaseModel):
-    """Resumo da comparação mais recente de uma associação."""
 
     associacao: str = Field(..., description="Código da associação")
     executado_em: datetime = Field(..., description="Data/hora da última comparação")
@@ -17,7 +15,6 @@ class AssociacaoResumoResponse(BaseModel):
 
 
 class ComparacaoRequest(BaseModel):
-    """Parâmetros para execução da comparação via POST."""
 
     associacao: str = Field(..., description="Código da associação para filtrar")
 
@@ -31,13 +28,6 @@ class ComparacaoRequest(BaseModel):
 
 
 class DivergenciaResponse(BaseModel):
-    """Representa uma farmácia com divergência entre GoldVendas e SilverSTGN_Dedup.
-
-    Tipos de divergência:
-    - data_diferente: presente em ambas mas com ultima_venda diferente
-    - apenas_gold_vendas: presente somente em associacao.vendas
-    - apenas_silver_stgn_dedup: presente somente em silver.cadcvend_staging_dedup
-    """
 
     cod_farmacia: int = Field(..., description="Código da farmácia")
     nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (quando disponível)")
@@ -77,7 +67,6 @@ class DivergenciaResponse(BaseModel):
 
 
 class FarmaciaStatusResponse(BaseModel):
-    """Status de migração de uma farmácia no Business Connect e no Coletor BI."""
 
     cod_farmacia: str = Field(..., description="Código da farmácia")
     coletor_novo: str = Field(
@@ -94,7 +83,6 @@ class FarmaciaStatusResponse(BaseModel):
 
 
 class ResultadoConsolidadoResponse(BaseModel):
-    """Registro consolidado com dados de GoldVendas e SilverSTGN_Dedup lado a lado."""
 
     associacao: Optional[str] = Field(None, description="Código da associação")
     cod_farmacia: str = Field(..., description="Código da farmácia")
@@ -127,7 +115,6 @@ class ResultadoConsolidadoResponse(BaseModel):
 
 
 class ComparacaoResponse(BaseModel):
-    """Resultado completo de uma comparação entre GoldVendas e SilverSTGN_Dedup."""
 
     associacao: str = Field(..., description="Código da associação comparada")
     total_gold_vendas: int = Field(..., ge=0, description="Total de registros em associacao.vendas")
@@ -158,7 +145,6 @@ class ComparacaoResponse(BaseModel):
 
 
 class VendasParceirosItemResponse(BaseModel):
-    """Um registro de vendas_parceiros com dados cadastrais da farmácia."""
     cod_farmacia: str = Field(..., description="Código da farmácia (dimensao_cadastro_lojas)")
     nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia")
     sit_contrato: Optional[str] = Field(None, description="Situação do contrato")
@@ -168,6 +154,5 @@ class VendasParceirosItemResponse(BaseModel):
     ultima_venda_parceiros: Optional[str] = Field(None, description="Data/hora da última venda em vendas_parceiros")
 
 class VendasParceirosResponse(BaseModel):
-    """Resultado da consulta de vendas_parceiros para todas as redes."""
     total: int = Field(..., ge=0, description="Total de registros retornados")
     resultados: list[VendasParceirosItemResponse] = Field(default_factory=list, description="Lista de registros")

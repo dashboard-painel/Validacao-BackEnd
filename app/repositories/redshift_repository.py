@@ -32,7 +32,7 @@ FROM (
         ON v.codigo = d.cod_farmacia
         AND v.associacao = %s
     WHERE d.codigo_rede = %s
-    AND d.sistema = 'TRIER' -- filtro para remover farmacias parceiras
+    AND d.sistema = 'TRIER' -- filtro
 ) sub
 WHERE rn = 1
 ORDER BY ultima_venda DESC, ultima_hora_venda DESC;

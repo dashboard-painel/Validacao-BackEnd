@@ -1,22 +1,20 @@
-"""Módulo de persistência local no PostgreSQL para resultados de comparação."""
 import os
 import re
 from typing import Optional
-from urllib.parse import urlparse
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 
 def _sanitize_cnpj(cnpj: Optional[str]) -> Optional[str]:
-    """Remove pontuação do CNPJ, retornando apenas os 14 dígitos."""
+
     if not cnpj:
         return cnpj
     return re.sub(r"[.\-/]", "", cnpj)
 
 
 def get_local_connection():
-    """Retorna conexão com o PostgreSQL local."""
+
     url = os.getenv("LOCAL_DB_URL", "")
     url = url.replace("jdbc:", "", 1)
     user = os.getenv("LOCAL_DB_USER")
@@ -27,7 +25,7 @@ def get_local_connection():
 
 
 def init_local_db():
-    """Cria as tabelas necessárias no PostgreSQL local se não existirem."""
+
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -40,7 +38,6 @@ def init_local_db():
                     total_divergencias INTEGER NOT NULL
                 );
 
-                -- Dados brutos de cada fonte (mantidos para auditoria/debug)
                 CREATE TABLE IF NOT EXISTS resultados_gold_vendas (
                     id SERIAL PRIMARY KEY,
                     comparacao_id INTEGER REFERENCES comparacoes(id),
@@ -65,8 +62,6 @@ def init_local_db():
                     UNIQUE (associacao, cod_farmacia)
                 );
 
-                -- Estado atual consolidado de cada farmácia: dados de ambas as fontes,
-                -- tipo de divergência e status dos coletores (Business Connect + Coletor BI).
                 CREATE TABLE IF NOT EXISTS farmacias (
                     id SERIAL PRIMARY KEY,
                     comparacao_id INTEGER REFERENCES comparacoes(id),
@@ -101,7 +96,7 @@ def init_local_db():
                     UNIQUE (associacao, cod_farmacia)
                 );
             """)
-            # Migração: garante colunas e remove duplicação em tabelas já existentes
+
             cur.execute("ALTER TABLE resultados_gold_vendas ADD COLUMN IF NOT EXISTS sit_contrato VARCHAR(50)")
             cur.execute("ALTER TABLE resultados_gold_vendas ADD COLUMN IF NOT EXISTS codigo_rede VARCHAR(50)")
             cur.execute("ALTER TABLE resultados_gold_vendas DROP COLUMN IF EXISTS associacao")
@@ -112,7 +107,7 @@ def init_local_db():
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS dat_hora_emissao_vendas_parceiros TIMESTAMP")
             cur.execute("ALTER TABLE farmacias ADD COLUMN IF NOT EXISTS num_versao VARCHAR(50)")
             cur.execute("ALTER TABLE comparacoes ADD COLUMN IF NOT EXISTS total_vendas_parceiros INTEGER DEFAULT 0")
-            # Migração: repurpose resultados_vendas_parceiros com novas colunas
+
             cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS nome_farmacia VARCHAR(255)")
             cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS sit_contrato VARCHAR(50)")
             cur.execute("ALTER TABLE resultados_vendas_parceiros ADD COLUMN IF NOT EXISTS farmacia VARCHAR(100)")
@@ -137,26 +132,9 @@ def salvar_comparacao(
     resultados_silver_stgn_dedup: list[dict],
     divergencias: list[dict],
 ) -> int:
-    """Salva os resultados da comparação no PostgreSQL local.
-
-    comparacoes é append-only: cada rodada gera um novo ID (histórico de execuções).
-    As tabelas filhas usam UPSERT em (associacao, cod_farmacia), preservando os IDs
-    das farmácias entre rodadas. comparacao_id nas filhas aponta para a rodada mais recente.
-    Farmácias que desapareceram do novo resultado são removidas.
-
-    Args:
-        associacao: Código da associação comparada
-        resultados_gold_vendas: Lista de dicts com resultados de associacao.vendas
-        resultados_silver_stgn_dedup: Lista de dicts com resultados de silver.cadcvend_staging_dedup
-        divergencias: Lista de dicts com as divergências encontradas
-
-    Returns:
-        int: ID da nova comparação criada em comparacoes
-    """
 
     with get_local_connection() as conn:
         with conn.cursor() as cur:
-            # Nova linha a cada rodada — histórico de execuções
             cur.execute("""
                 INSERT INTO comparacoes (associacao, total_gold_vendas, total_silver_stgn_dedup, total_divergencias)
                 VALUES (%s, %s, %s, %s)
@@ -164,7 +142,6 @@ def salvar_comparacao(
             """, (associacao, len(resultados_gold_vendas), len(resultados_silver_stgn_dedup), len(divergencias)))
             comparacao_id = cur.fetchone()[0]
 
-            # --- resultados_gold_vendas ---
             novos_gold = {str(r["cod_farmacia"]).strip() for r in resultados_gold_vendas}
             if novos_gold:
                 cur.execute(
@@ -190,7 +167,6 @@ def salvar_comparacao(
                             num_versao        = EXCLUDED.num_versao
                 """, (comparacao_id, r["cod_farmacia"], r.get("nome_farmacia"), r.get("cnpj"), r.get("sit_contrato"), r.get("codigo_rede") or associacao, r.get("ultima_venda"), r.get("ultima_hora_venda"), r.get("num_versao")))
 
-            # --- resultados_silver_stgn_dedup ---
             novos_silver = {str(r["cod_farmacia"]).strip() for r in resultados_silver_stgn_dedup}
             if novos_silver:
                 cur.execute(
@@ -210,7 +186,6 @@ def salvar_comparacao(
                             ultima_hora_venda = EXCLUDED.ultima_hora_venda
                 """, (associacao, comparacao_id, r["cod_farmacia"], r.get("ultima_venda"), r.get("ultima_hora_venda")))
 
-            # --- farmacias (consolidado + divergências) ---
             gold_by_cod = {str(r["cod_farmacia"]).strip(): r for r in resultados_gold_vendas}
             silver_by_cod = {str(r["cod_farmacia"]).strip(): r for r in resultados_silver_stgn_dedup}
             todas_farmacias = set(gold_by_cod.keys()) | set(silver_by_cod.keys())
@@ -272,7 +247,6 @@ def salvar_comparacao(
 
 
 def buscar_ultima_atualizacao() -> Optional[str]:
-    """Retorna a data/hora da comparação mais recente entre todas as associações."""
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT MAX(executado_em)::text FROM comparacoes")
@@ -281,7 +255,6 @@ def buscar_ultima_atualizacao() -> Optional[str]:
 
 
 def buscar_ultima_atualizacao_vendas_parceiros() -> Optional[str]:
-    """Retorna a data/hora da atualização mais recente de vendas_parceiros."""
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT MAX(atualizado_em)::text FROM resultados_vendas_parceiros")
@@ -290,7 +263,6 @@ def buscar_ultima_atualizacao_vendas_parceiros() -> Optional[str]:
 
 
 def buscar_todos_consolidados() -> list[dict]:
-    """Retorna todas as farmácias de todas as associações (dados da última rodada de cada uma)."""
     with get_local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
@@ -321,7 +293,6 @@ def buscar_todos_consolidados() -> list[dict]:
 
 
 def buscar_historico_por_associacao(associacao: str) -> list[dict]:
-    """Busca o estado atual de todas as farmácias de uma associação."""
     with get_local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
@@ -359,11 +330,8 @@ def salvar_status_farmacias(
     coletor_bi: dict[str, str] | None = None,
     classificacao_dict: dict[str, str | None] | None = None,
 ) -> None:
-    """Atualiza o status dos coletores (Business Connect + Coletor BI) em farmacias."""
     if not status_farmacias:
         return
-
-    # coletor_bi = coletor_bi or {}  # coletor_bi desativado
 
     with get_local_connection() as conn:
         with conn.cursor() as cur:
@@ -392,10 +360,9 @@ def salvar_status_farmacias(
 
 
 def salvar_vendas_parceiros(resultados: list[dict]) -> int:
-    """Persiste resultados de vendas_parceiros no PostgreSQL local via UPSERT."""
+
     with get_local_connection() as conn:
         with conn.cursor() as cur:
-            # Limpa registros antigos que não estão mais no resultado
             novos_keys = {
                 (str(r.get("associacao", "")).strip(), str(r["cod_farmacia"]).strip())
                 for r in resultados
@@ -431,7 +398,6 @@ def salvar_vendas_parceiros(resultados: list[dict]) -> int:
 
 
 def buscar_vendas_parceiros() -> list[dict]:
-    """Retorna todos os resultados de vendas_parceiros persistidos."""
     with get_local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""

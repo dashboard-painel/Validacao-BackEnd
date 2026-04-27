@@ -1,4 +1,3 @@
-"""Modelos de domínio internos da comparação (não são schemas de API)."""
 from dataclasses import dataclass, field
 from typing import Optional
 

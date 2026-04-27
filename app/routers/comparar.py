@@ -1,4 +1,3 @@
-"""Router para endpoint de comparação de dados."""
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -110,7 +109,7 @@ def vendas_parceiros() -> VendasParceirosResponse:
 
 @router.get("/vendas-parceiros/historico", response_model=VendasParceirosResponse)
 def vendas_parceiros_historico() -> VendasParceirosResponse:
-    """Retorna vendas_parceiros do banco local (sem consultar Redshift)."""
+
     try:
         rows = buscar_vendas_parceiros()
         items = [
@@ -135,7 +134,7 @@ def vendas_parceiros_historico() -> VendasParceirosResponse:
 
 @router.get("/vendas-parceiros/ultima-atualizacao")
 def ultima_atualizacao_vendas_parceiros() -> dict:
-    """Retorna a última atualização de vendas_parceiros no banco local."""
+
     try:
         atualizado_em = buscar_ultima_atualizacao_vendas_parceiros()
     except Exception as e:
