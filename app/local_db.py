@@ -363,22 +363,18 @@ def salvar_status_farmacias(
     if not status_farmacias:
         return
 
-    coletor_bi = coletor_bi or {}
+    # coletor_bi = coletor_bi or {}  # coletor_bi desativado
 
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             for cod_farmacia, coletor_novo in status_farmacias.items():
-                dados_bi = coletor_bi.get(cod_farmacia) or {}
+                # dados_bi = coletor_bi.get(cod_farmacia) or {}  # coletor_bi desativado
                 cur.execute("""
                     UPDATE farmacias
-                    SET coletor_novo           = %s,
-                        coletor_bi_ultima_data = %s,
-                        coletor_bi_ultima_hora = %s
+                    SET coletor_novo = %s
                     WHERE codigo_rede = %s AND cod_farmacia = %s
                 """, (
                     coletor_novo,
-                    dados_bi.get("ultima_data"),
-                    dados_bi.get("ultima_hora"),
                     associacao,
                     cod_farmacia,
                 ))

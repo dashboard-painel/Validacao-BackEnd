@@ -11,7 +11,7 @@ class AssociacaoResumoResponse(BaseModel):
     associacao: str = Field(..., description="Código da associação")
     executado_em: datetime = Field(..., description="Data/hora da última comparação")
     total_gold_vendas: int = Field(..., ge=0, description="Total de farmácias em associacao.vendas")
-    total_silver_stgn_dedup: int = Field(..., ge=0, description="Total de farmácias em silver.cadcvend_staging_dedup")
+    # total_silver_stgn_dedup: int = Field(..., ge=0, description="Total de farmácias em silver.cadcvend_staging_dedup")  # silver desativado
     total_divergencias: int = Field(..., ge=0, description="Quantidade de divergências encontradas")
     comparacao_id: int = Field(..., description="ID da comparação no banco local")
 
@@ -47,8 +47,8 @@ class DivergenciaResponse(BaseModel):
     num_versao: Optional[str] = Field(None, description="Versão do coletor da farmácia (quando disponível)")
     ultima_venda_GoldVendas: Optional[str] = Field(None, description="Data da última venda em associacao.vendas (YYYY-MM-DD)")
     ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
-    ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Data da última venda em silver.cadcvend_staging_dedup (YYYY-MM-DD)")
-    ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")
+    # ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Data da última venda em silver.cadcvend_staging_dedup (YYYY-MM-DD)")  # silver desativado
+    # ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")  # silver desativado
     tipo_divergencia: str = Field(..., description="Tipo: data_diferente, apenas_gold_vendas, apenas_silver_stgn_dedup")
     camadas_atrasadas: Optional[list[str]] = Field(
         None,
@@ -84,8 +84,8 @@ class FarmaciaStatusResponse(BaseModel):
         ...,
         description=(
             "Status do coletor (Business Connect): "
-            "'OK, sem registro' | "
-            "'Pendente de envio no dia YYYY-MM-DD' | "
+            "'Sem pendências' | "
+            "'Pendente de envio no dia DD/MM/YYYY HH:MM:SS' | "
             "'Indisponível'"
         ),
     )
@@ -131,7 +131,7 @@ class ComparacaoResponse(BaseModel):
 
     associacao: str = Field(..., description="Código da associação comparada")
     total_gold_vendas: int = Field(..., ge=0, description="Total de registros em associacao.vendas")
-    total_silver_stgn_dedup: int = Field(..., ge=0, description="Total de registros em silver.cadcvend_staging_dedup")
+    # total_silver_stgn_dedup: int = Field(..., ge=0, description="Total de registros em silver.cadcvend_staging_dedup")  # silver desativado
     total_divergencias: int = Field(..., ge=0, description="Quantidade de divergências encontradas")
     comparacao_id: Optional[int] = Field(None, description="ID da comparação salva no banco local")
     divergencias: list[DivergenciaResponse] = Field(

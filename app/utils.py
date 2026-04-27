@@ -1,5 +1,5 @@
 """Utilitários de domínio compartilhados entre camadas."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional, Tuple
 
 
@@ -33,7 +33,7 @@ def camadas_atrasadas(
     if coletor_novo and coletor_novo.startswith("Pendente de envio no dia "):
         data_api = coletor_novo.removeprefix("Pendente de envio no dia ").strip()
         try:
-            if date.fromisoformat(data_api[:10]) < ontem:
+            if datetime.strptime(data_api, "%d/%m/%Y %H:%M:%S").date() < ontem:
                 atrasadas.append("API")
         except ValueError:
             pass

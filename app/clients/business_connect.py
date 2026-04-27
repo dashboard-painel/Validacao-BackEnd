@@ -3,12 +3,29 @@ import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 _BC_BASE_URL = "https://business-connect.triercloud.com.br/v1"
+
+
+def _formatar_data_upload(raw: str) -> str:
+    """Converte data_upload_datalake de ISO para DD/MM/YYYY HH:MM:SS."""
+    raw = (raw or "").strip()
+    if not raw:
+        return raw
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(raw[:19], fmt).strftime("%d/%m/%Y %H:%M:%S")
+        except ValueError:
+            continue
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").strftime("%d/%m/%Y 00:00:00")
+    except ValueError:
+        return raw
 
 
 def get_bearer_token() -> str:
@@ -70,10 +87,10 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
         )
     except requests.RequestException as e:
         logger.warning("Business Connect request falhou para farmácia %s: %s", cod_farmacia, e)
-        return "OK, sem registro"
+        return "Sem pendências"
 
     if response.status_code == 404:
-        return "OK, sem registro"
+        return "Sem pendências"
 
     if response.status_code != 200:
         logger.warning(
@@ -81,7 +98,7 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
             cod_farmacia,
             response.status_code,
         )
-        return "OK, sem registro"
+        return "Sem pendências"
 
     try:
         registros = response.json()
@@ -93,9 +110,9 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
     for registro in registros:
         if isinstance(registro, dict) and registro.get("table_name") == "cadcvend":
             data_upload = registro.get("data_upload_datalake", "")
-            return f"Pendente de envio no dia {data_upload}"
+            return f"Pendente de envio no dia {_formatar_data_upload(data_upload)}"
 
-    return "OK, sem registro"
+    return "Sem pendências"
 
 
 def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
@@ -132,7 +149,7 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
                 resultado[cod] = future.result()
             except Exception as e:
                 logger.warning("Erro ao buscar status farmácia %s: %s", cod, e)
-                resultado[cod] = "OK, sem registro"
+                resultado[cod] = "Sem pendências"
 
     logger.info("✅ Business Connect — %d farmácias consultadas em %.2fs", len(resultado), time.perf_counter() - t_parallel)
     return resultado
