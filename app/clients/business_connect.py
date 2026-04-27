@@ -1,14 +1,30 @@
-"""Módulo de integração com a API Business Connect para status de migração."""
 import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
 
 import requests
 
 logger = logging.getLogger(__name__)
 
 _BC_BASE_URL = "https://business-connect.triercloud.com.br/v1"
+
+
+def _formatar_data_upload(raw: str) -> str:
+
+    raw = (raw or "").strip()
+    if not raw:
+        return raw
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"):
+        try:
+            return datetime.strptime(raw[:19], fmt).strftime("%d/%m/%Y %H:%M:%S")
+        except ValueError:
+            continue
+    try:
+        return datetime.strptime(raw[:10], "%Y-%m-%d").strftime("%d/%m/%Y 00:00:00")
+    except ValueError:
+        return raw
 
 
 def get_bearer_token() -> str:
@@ -37,7 +53,7 @@ def get_bearer_token() -> str:
         )
 
     data = response.json()
-    # A API pode retornar o token sob chaves diferentes — tentamos as mais comuns
+
     token = data.get("access") or data.get("access_token") or data.get("token") or data.get("accessToken")
     if not token:
         raise Exception(
@@ -47,20 +63,7 @@ def get_bearer_token() -> str:
 
 
 def get_status_farmacia(cod_farmacia: str, token: str) -> str:
-    """Consulta o status de migração de uma farmácia no Business Connect.
 
-    Procura na resposta qualquer registro onde table_name == "cadcvend".
-    - Se encontrado: retorna "Pendente de envio no dia {data_upload_datalake}"
-    - Se não encontrado ou farmácia não cadastrada (404): retorna "OK, sem registro"
-    - Se request falhar por outro motivo: loga warning e retorna "OK, sem registro"
-
-    Args:
-        cod_farmacia: Código da farmácia a consultar
-        token: Bearer token obtido via get_bearer_token()
-
-    Returns:
-        str: Texto descritivo do status coletor_novo
-    """
     url = f"{_BC_BASE_URL}/migration/pharmacy/{cod_farmacia}/status"
     try:
         response = requests.get(
@@ -70,10 +73,10 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
         )
     except requests.RequestException as e:
         logger.warning("Business Connect request falhou para farmácia %s: %s", cod_farmacia, e)
-        return "OK, sem registro"
+        return "Sem pendências"
 
     if response.status_code == 404:
-        return "OK, sem registro"
+        return "Sem pendências"
 
     if response.status_code != 200:
         logger.warning(
@@ -81,7 +84,7 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
             cod_farmacia,
             response.status_code,
         )
-        return "OK, sem registro"
+        return "Sem pendências"
 
     try:
         registros = response.json()
@@ -89,31 +92,16 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
         logger.warning("Business Connect resposta inválida para farmácia %s: %s", cod_farmacia, e)
         return "OK, sem registro"
 
-    # Procura registro onde table_name == "cadcvend"
     for registro in registros:
         if isinstance(registro, dict) and registro.get("table_name") == "cadcvend":
             data_upload = registro.get("data_upload_datalake", "")
-            return f"Pendente de envio no dia {data_upload}"
+            return f"Pendente de envio no dia {_formatar_data_upload(data_upload)}"
 
-    return "OK, sem registro"
+    return "Sem pendências"
 
 
 def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
-    """Obtém o status de migração para uma lista de farmácias em paralelo.
 
-    Obtém o Bearer token UMA única vez e reutiliza para todas as consultas.
-    Usa ThreadPoolExecutor para consultar múltiplas farmácias em paralelo.
-    Se a lista de códigos estiver vazia, retorna dict vazio sem fazer requests.
-
-    Args:
-        codigos: Lista de códigos de farmácia a consultar
-
-    Returns:
-        dict[str, str]: Mapeamento {cod_farmacia: coletor_novo}
-
-    Raises:
-        Exception: Se a autenticação falhar (propagado para o caller decidir o fallback)
-    """
     if not codigos:
         return {}
 
@@ -132,7 +120,7 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
                 resultado[cod] = future.result()
             except Exception as e:
                 logger.warning("Erro ao buscar status farmácia %s: %s", cod, e)
-                resultado[cod] = "OK, sem registro"
+                resultado[cod] = "Sem pendências"
 
     logger.info("✅ Business Connect — %d farmácias consultadas em %.2fs", len(resultado), time.perf_counter() - t_parallel)
     return resultado

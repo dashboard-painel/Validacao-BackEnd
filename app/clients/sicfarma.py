@@ -1,4 +1,3 @@
-"""Módulo de integração com a API Sicfarma para classificação de farmácias."""
 import logging
 import os
 import time
@@ -34,10 +33,7 @@ _SESSION.mount("http://", HTTPAdapter(max_retries=_RETRY_CONFIG, pool_connection
 
 
 def _get_with_retry(url: str, **kwargs) -> requests.Response:
-    """GET com até 2 retentativas automáticas em erros 5xx (backoff: 1s, 2s).
 
-    Usa session compartilhada para reutilizar conexões e evitar overhead de SSL por chamada.
-    """
     return _SESSION.get(url, **kwargs)
 
 _SICFARMA_CLASSIFICATION_MAP: dict[int, str] = {
@@ -56,17 +52,7 @@ _SICFARMA_CLASSIFICATION_MAP: dict[int, str] = {
 
 
 def buscar_classificacao_por_codigo(cod_farmacia: str) -> str | None:
-    """Busca a classificação de uma farmácia pelo código via API Sicfarma.
 
-    Chama GET {SICFARMA_URL}?id={cod_farmacia} com Basic Auth.
-    Extrai o campo 'classificacaoFarmacia' da resposta e converte para label de texto.
-
-    Args:
-        cod_farmacia: Código da farmácia a consultar.
-
-    Returns:
-        Label da classificação (ex: 'GOLD', 'PRIME') ou None em caso de falha ou código desconhecido.
-    """
     try:
         response = _get_with_retry(
             SICFARMA_URL,
@@ -117,17 +103,7 @@ def buscar_classificacao_por_codigo(cod_farmacia: str) -> str | None:
 
 
 def buscar_versao_por_codigo(cod_farmacia: str) -> str | None:
-    """Busca a versão do coletor (codSistema=21) via endpoint /versoes da API Sicfarma.
 
-    Chama GET {SICFARMA_URL}/versoes?id={cod_farmacia} com Basic Auth.
-    Filtra o item com codSistema == COD_SISTEMA_COLETOR e retorna numVersao.
-
-    Args:
-        cod_farmacia: Código da farmácia a consultar.
-
-    Returns:
-        String com a versão do coletor (ex: '1.0.78') ou None em caso de falha ou não encontrado.
-    """
     if not SICFARMA_URL:
         return None
 
@@ -172,14 +148,7 @@ def buscar_versao_por_codigo(cod_farmacia: str) -> str | None:
 
 
 def buscar_versoes_farmacias(codigos: list[str]) -> dict[str, str | None]:
-    """Busca a versão do coletor de múltiplas farmácias em paralelo.
 
-    Args:
-        codigos: Lista de códigos de farmácia a consultar.
-
-    Returns:
-        dict[str, str | None]: Mapeamento {cod_farmacia: num_versao_or_none}
-    """
     if not codigos:
         return {}
 
@@ -203,14 +172,7 @@ def buscar_versoes_farmacias(codigos: list[str]) -> dict[str, str | None]:
 
 
 def buscar_classificacao_farmacias(codigos: list[str]) -> dict[str, str | None]:
-    """Busca a classificação de múltiplas farmácias em paralelo.
 
-    Args:
-        codigos: Lista de códigos de farmácia a consultar.
-
-    Returns:
-        dict[str, str | None]: Mapeamento {cod_farmacia: classificacao_label_or_none}
-    """
     if not codigos:
         return {}
 

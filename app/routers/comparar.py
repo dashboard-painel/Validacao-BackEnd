@@ -1,4 +1,3 @@
-"""Router para endpoint de comparação de dados."""
 import logging
 
 from fastapi import APIRouter, HTTPException, Query
@@ -7,7 +6,7 @@ from app.repositories.comparacao_repository import (
     buscar_todos_consolidados,
     buscar_historico_por_associacao,
     buscar_ultima_atualizacao,
-    buscar_por_codigo,
+    # buscar_por_codigo,
 )
 from app.local_db import buscar_vendas_parceiros, buscar_ultima_atualizacao_vendas_parceiros
 
@@ -86,15 +85,15 @@ def ultima_atualizacao() -> dict:
 
     return {"atualizado_em": atualizado_em}
 
-@router.get("/coletor/{codigo}")
-def coletor_codigo(codigo: str) -> dict:
-    try:
-        data_hora_ultima_venda = buscar_por_codigo(codigo)
-    except Exception as e:
-        logger.error("Erro ao buscar status do coletor para código %s: %s: %s", codigo, type(e).__name__, e)
-        raise HTTPException(status_code=503, detail=f"Erro ao acessar o coletor. Detalhes: {type(e).__name__}")
-
-    return {"data_hora_ultima_venda": data_hora_ultima_venda}
+# @router.get("/coletor/{codigo}")
+# def coletor_codigo(codigo: str) -> dict:
+#     try:
+#         data_hora_ultima_venda = buscar_por_codigo(codigo)
+#     except Exception as e:
+#         logger.error("Erro ao buscar status do coletor para código %s: %s: %s", codigo, type(e).__name__, e)
+#         raise HTTPException(status_code=503, detail=f"Erro ao acessar o coletor. Detalhes: {type(e).__name__}")
+#
+#     return {"data_hora_ultima_venda": data_hora_ultima_venda}
 
 @router.get("/vendas-parceiros", response_model=VendasParceirosResponse)
 def vendas_parceiros() -> VendasParceirosResponse:
@@ -110,7 +109,7 @@ def vendas_parceiros() -> VendasParceirosResponse:
 
 @router.get("/vendas-parceiros/historico", response_model=VendasParceirosResponse)
 def vendas_parceiros_historico() -> VendasParceirosResponse:
-    """Retorna vendas_parceiros do banco local (sem consultar Redshift)."""
+
     try:
         rows = buscar_vendas_parceiros()
         items = [
@@ -135,7 +134,7 @@ def vendas_parceiros_historico() -> VendasParceirosResponse:
 
 @router.get("/vendas-parceiros/ultima-atualizacao")
 def ultima_atualizacao_vendas_parceiros() -> dict:
-    """Retorna a última atualização de vendas_parceiros no banco local."""
+
     try:
         atualizado_em = buscar_ultima_atualizacao_vendas_parceiros()
     except Exception as e:

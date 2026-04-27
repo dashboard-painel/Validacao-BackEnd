@@ -1,4 +1,3 @@
-"""FastAPI application entry point."""
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -22,11 +21,6 @@ logging.basicConfig(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Gerencia o ciclo de vida da aplicação.
-
-    Startup: Inicializa as tabelas do banco de dados local.
-    Shutdown: (nenhuma ação necessária)
-    """
     init_local_db()
     yield
 
@@ -38,8 +32,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — permite que o frontend existente consuma a API
-# CORS_ORIGINS pode ser "*" ou lista separada por vírgulas
 cors_origins_env = os.getenv("CORS_ORIGINS", "*")
 allow_origins = ["*"] if cors_origins_env == "*" else [o.strip() for o in cors_origins_env.split(",")]
 
@@ -56,7 +48,6 @@ app.include_router(comparar.router)
 
 @app.get("/")
 async def root():
-    """Root endpoint - API information."""
     return {
         "name": "Validacao-BackEnd",
         "version": "0.1.0",
