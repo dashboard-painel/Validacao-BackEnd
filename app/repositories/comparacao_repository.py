@@ -1,5 +1,5 @@
 from app.clients.business_connect import buscar_status_farmacias as _buscar_status_farmacias
-from app.local_db import (
+from app.db.local import (
     salvar_comparacao as _salvar_comparacao,
     salvar_status_farmacias as _salvar_status_farmacias,
     buscar_todos_consolidados as _buscar_todos_consolidados,

@@ -1,6 +1,11 @@
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Optional
 
+from pydantic import BaseModel, Field
+
+
+# ── Domain models (internos) ───────────────────────────────────────────────────
 
 @dataclass
 class Divergencia:
@@ -10,9 +15,7 @@ class Divergencia:
     cnpj: Optional[str]
     ultima_venda_GoldVendas: Optional[str]
     ultima_hora_venda_GoldVendas: Optional[str]
-    # ultima_venda_SilverSTGN_Dedup: Optional[str]  # silver desativado
-    # ultima_hora_venda_SilverSTGN_Dedup: Optional[str]  # silver desativado
-    tipo_divergencia: str  # "data_diferente", "apenas_gold_vendas", "apenas_silver_stgn_dedup"
+    tipo_divergencia: str
     sit_contrato: Optional[str] = None
     codigo_rede: Optional[str] = None
     num_versao: Optional[str] = None
@@ -23,11 +26,144 @@ class ResultadoComparacao:
 
     associacao: str
     total_gold_vendas: int
-    # total_silver_stgn_dedup: int  # silver desativado
     total_divergencias: int
     divergencias: list[Divergencia] = field(default_factory=list)
     comparacao_id: Optional[int] = None
     todas_farmacias: set = field(default_factory=set)
     resultados_gold_vendas: list[dict] = field(default_factory=list)
-    # resultados_silver_stgn_dedup: list[dict] = field(default_factory=list)  # silver desativado
+
+
+# ── API schemas (request/response) ────────────────────────────────────────────
+
+class AssociacaoResumoResponse(BaseModel):
+
+    associacao: str = Field(..., description="Código da associação")
+    executado_em: datetime = Field(..., description="Data/hora da última comparação")
+    total_gold_vendas: int = Field(..., ge=0, description="Total de farmácias em associacao.vendas")
+    total_divergencias: int = Field(..., ge=0, description="Quantidade de divergências encontradas")
+    comparacao_id: int = Field(..., description="ID da comparação no banco local")
+
+
+class ComparacaoRequest(BaseModel):
+
+    associacao: str = Field(..., description="Código da associação para filtrar")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "associacao": "80",
+            }
+        }
+    }
+
+
+class DivergenciaResponse(BaseModel):
+
+    cod_farmacia: int = Field(..., description="Código da farmácia")
+    nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (quando disponível)")
+    cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (quando disponível)")
+    sit_contrato: Optional[str] = Field(None, description="Situação do contrato da farmácia (quando disponível)")
+    codigo_rede: Optional[int] = Field(None, description="Código da rede da farmácia (quando disponível)")
+    num_versao: Optional[str] = Field(None, description="Versão do coletor da farmácia (quando disponível)")
+    ultima_venda_GoldVendas: Optional[str] = Field(None, description="Data da última venda em associacao.vendas (YYYY-MM-DD)")
+    ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
+    tipo_divergencia: str = Field(..., description="Tipo: data_diferente, apenas_gold_vendas, apenas_silver_stgn_dedup")
+    camadas_atrasadas: Optional[list[str]] = Field(
+        None,
+        description="Camadas com ultima_venda mais antiga que D-1: 'GoldVendas', 'SilverSTGN_Dedup', 'API'",
+    )
+    camadas_sem_dados: Optional[list[str]] = Field(
+        None,
+        description="Camadas sem nenhum registro de venda: 'GoldVendas', 'SilverSTGN_Dedup'",
+    )
+    classificacao: Optional[str] = Field(None, description="Classificação Sicfarma da farmácia (ex: GOLD, PRIME, SELECT1)")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "cod_farmacia": "001",
+                "nome_farmacia": "Farmacia Central",
+                "cnpj": "12.345.678/0001-99",
+                "ultima_venda_GoldVendas": "2024-03-15",
+                "ultima_hora_venda_GoldVendas": "14:30:00",
+                "tipo_divergencia": "data_diferente",
+            }
+        }
+    }
+
+
+class FarmaciaStatusResponse(BaseModel):
+
+    cod_farmacia: str = Field(..., description="Código da farmácia")
+    coletor_novo: str = Field(
+        ...,
+        description=(
+            "Status do coletor (Business Connect): "
+            "'Sem pendências' | "
+            "'Pendente de envio no dia DD/MM/YYYY HH:MM:SS' | "
+            "'Indisponível'"
+        ),
+    )
+    coletor_bi_ultima_data: Optional[str] = Field(None, description="Data da última venda no Coletor BI (YYYY-MM-DD)")
+    coletor_bi_ultima_hora: Optional[str] = Field(None, description="Hora da última venda no Coletor BI (HH:MM:SS)")
+
+
+class ResultadoConsolidadoResponse(BaseModel):
+
+    associacao: Optional[str] = Field(None, description="Código da associação")
+    cod_farmacia: str = Field(..., description="Código da farmácia")
+    nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia")
+    cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (somente dígitos)")
+    sit_contrato: Optional[str] = Field(None, description="Situação do contrato da farmácia")
+    codigo_rede: Optional[str] = Field(None, description="Código da rede da farmácia")
+    num_versao: Optional[str] = Field(None, description="Versão do coletor da farmácia")
+    ultima_venda_GoldVendas: Optional[str] = Field(None, description="Última venda em associacao.vendas")
+    ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
+    ultima_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Última venda em silver.cadcvend_staging_dedup")
+    ultima_hora_venda_SilverSTGN_Dedup: Optional[str] = Field(None, description="Hora da última venda em silver.cadcvend_staging_dedup")
+    coletor_novo: Optional[str] = Field(None, description="Status do coletor no Business Connect")
+    coletor_bi_ultima_data: Optional[str] = Field(None, description="Data da última venda no Coletor BI (YYYY-MM-DD)")
+    coletor_bi_ultima_hora: Optional[str] = Field(None, description="Hora da última venda no Coletor BI (HH:MM:SS)")
+    tipo_divergencia: Optional[str] = Field(None, description="Tipo de divergência, null se não há divergência")
+    camadas_atrasadas: Optional[list[str]] = Field(
+        None,
+        description="Camadas com atraso: 'GoldVendas', 'SilverSTGN_Dedup', 'API'",
+    )
+    camadas_sem_dados: Optional[list[str]] = Field(
+        None,
+        description="Camadas sem nenhum registro de venda: 'GoldVendas', 'SilverSTGN_Dedup'",
+    )
+    classificacao: Optional[str] = Field(None, description="Classificação Sicfarma da farmácia (ex: GOLD, PRIME, SELECT1)")
+    atualizado_em: Optional[datetime] = Field(
+        None,
+        description="Data/hora em que esta comparação foi executada",
+    )
+
+
+class ComparacaoResponse(BaseModel):
+
+    associacao: str = Field(..., description="Código da associação comparada")
+    total_gold_vendas: int = Field(..., ge=0, description="Total de registros em associacao.vendas")
+    total_divergencias: int = Field(..., ge=0, description="Quantidade de divergências encontradas")
+    comparacao_id: Optional[int] = Field(None, description="ID da comparação salva no banco local")
+    divergencias: list[DivergenciaResponse] = Field(
+        default_factory=list,
+        description="Lista detalhada das divergências",
+    )
+    status_farmacias: list[FarmaciaStatusResponse] = Field(
+        default_factory=list,
+        description="Status de migração de todas as farmácias (GoldVendas + SilverSTGN_Dedup) no Business Connect",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "associacao": "123",
+                "total_gold_vendas": 150,
+                "total_divergencias": 5,
+                "comparacao_id": 42,
+                "divergencias": [],
+            }
+        }
+    }
 

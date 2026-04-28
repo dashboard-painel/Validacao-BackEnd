@@ -2,8 +2,8 @@ import logging
 import time
 
 from app.repositories.redshift_repository import execute_vendas_parceiros
-from app.local_db import salvar_vendas_parceiros
-from app.schemas import VendasParceirosItemResponse, VendasParceirosResponse
+from app.db.local import salvar_vendas_parceiros
+from app.models.vendas import VendasParceirosItemResponse, VendasParceirosResponse
 
 logger = logging.getLogger(__name__)
 

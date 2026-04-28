@@ -1,7 +1,7 @@
 import logging
 import time
 
-from app.database import get_connection
+from app.db.redshift import get_connection
 
 logger = logging.getLogger(__name__)
 

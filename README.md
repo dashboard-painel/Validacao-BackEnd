@@ -71,7 +71,6 @@ curl "http://localhost:8000/comparar?associacao=123"
 {
   "associacao": "123",
   "total_gold_vendas": 150,
-  "total_silver_stgn_dedup": 148,
   "total_divergencias": 5,
   "comparacao_id": 42,
   "divergencias": [
@@ -81,9 +80,7 @@ curl "http://localhost:8000/comparar?associacao=123"
       "cnpj": "12345678000199",
       "ultima_venda_GoldVendas": "2024-03-15",
       "ultima_hora_venda_GoldVendas": "14:30:00",
-      "ultima_venda_SilverSTGN_Dedup": "2024-03-14",
-      "ultima_hora_venda_SilverSTGN_Dedup": "09:00:00",
-      "tipo_divergencia": "data_diferente",
+      "tipo_divergencia": "apenas_gold_vendas",
       "camadas_atrasadas": ["GoldVendas"],
       "camadas_sem_dados": null
     }
@@ -98,9 +95,7 @@ curl "http://localhost:8000/comparar?associacao=123"
 ```
 
 **Tipos de Divergência:**
-- `data_diferente` — Farmácia presente em ambas as fontes mas com datas distintas
 - `apenas_gold_vendas` — Farmácia presente somente em `associacao.vendas`
-- `apenas_silver_stgn_dedup` — Farmácia presente somente em `silver.cadcvend_staging_dedup`
 
 **Regra de atraso (`camadas_atrasadas`):**  
 Uma camada é considerada atrasada se a última venda for **anterior a D-1** (D-2 ou mais antigo) — mesmo critério para GoldVendas, SilverSTGN_Dedup e API.
@@ -185,26 +180,21 @@ Retorna `null` em `atualizado_em` se nenhuma comparação foi realizada ainda.
 ```
 POST /comparar?associacao=X  (ou GET)
        │
-       ├─ Redshift [GoldVendas]        → última venda por farmácia em associacao.vendas
-       ├─ Redshift [SilverSTGN_Dedup]  → última venda por farmácia em silver.cadcvend_staging_dedup
-       ├─ Redshift [cadfilia/dimensao] → enriquece razão social/CNPJ de farmácias silver-only
-       ├─ Comparação por cod_farmacia  → detecta divergências
-       ├─ Business Connect (paralelo)  → status de migração de todas as farmácias
-       ├─ Coletor BI (paralelo)        → última venda registrada no Coletor BI
+       ├─ Redshift [GoldVendas]              → última venda por farmácia em associacao.vendas
+       ├─ Comparação por cod_farmacia        → detecta divergências
+       ├─ Business Connect (paralelo)        → status de migração de todas as farmácias
        ├─ Sicfarma /classificacao (paralelo) → classificação da farmácia (GOLD, PRIME, etc.)
-       ├─ Sicfarma /versoes (paralelo) → versão do coletor instalado (num_versao)
-       └─ PostgreSQL local             → UPSERT por (associacao, cod_farmacia); IDs estáveis entre rodadas
+       ├─ Sicfarma /versoes (paralelo)       → versão do coletor instalado (num_versao)
+       └─ PostgreSQL local                   → UPSERT por (associacao, cod_farmacia)
 
 GET /historico
-       └─ PostgreSQL local             → última comparação de cada associação, com JOIN
-                                         em status_farmacias, divergencias e comparacoes
+       └─ PostgreSQL local                   → última comparação de cada associação
 ```
 
 ## Observações
 
 - O CNPJ é salvo **sem formatação** (somente os 14 dígitos) na tabela `resultados_consolidados`.
 - O nome da farmácia usa `nom_fantasia` (nome fantasia).
-- Dados cadastrais (razão social/CNPJ) de farmácias silver-only são enriquecidos via `associacao.dimensao_cadastro_lojas` com fallback para `silver.cadfilia_staging_dedup`.
 - IDs de farmácias no banco local são **estáveis entre rodadas** — o UPSERT em `(associacao, cod_farmacia)` garante que o mesmo registro é reutilizado.
 - A tabela `comparacoes` é **append-only**: cada rodada gera uma nova linha de histórico.
 - Todos os passos críticos emitem logs com tempo de resposta no formato `⏳ Aguardando... / ✅ respondeu em Xs`.
@@ -240,15 +230,24 @@ Com a API rodando, acesse:
 
 ```
 app/
-├── __init__.py
-├── main.py              # Entry point FastAPI + configuração de logging
-├── database.py          # Conexão com Redshift
-├── queries.py           # Queries SQL e enriquecimento cadastral
-├── comparador.py        # Lógica de comparação entre as duas fontes
-├── business_connect.py  # Integração com a API Business Connect
-├── local_db.py          # Persistência no PostgreSQL local
-├── schemas.py           # Modelos Pydantic
-└── routers/
-    ├── __init__.py
-    └── comparar.py      # Endpoints /comparar, /historico e /ultima-atualizacao
+├── main.py                        # Entry point FastAPI + logging
+├── utils.py                       # Helpers (ex: cálculo de camadas atrasadas)
+├── db/
+│   ├── redshift.py                # Conexão com o Amazon Redshift
+│   └── local.py                   # Conexão e operações no PostgreSQL local
+├── api/
+│   └── comparacao.py              # Endpoints: /comparar, /historico, /vendas-parceiros, etc.
+├── core/
+│   ├── comparacao.py              # Lógica de comparação + conversão para response
+│   └── vendas.py                  # Lógica de vendas parceiros
+├── models/
+│   ├── comparacao.py              # Modelos internos (dataclasses) + schemas Pydantic
+│   └── vendas.py                  # Schemas Pydantic de vendas parceiros
+├── clients/
+│   ├── business_connect.py        # Integração com a API Business Connect
+│   ├── sicfarma.py                # Integração com a API Sicfarma
+│   └── coletor_bi.py              # Integração com o Coletor BI (desativado)
+└── repositories/
+    ├── redshift_repository.py     # Queries no Redshift
+    └── comparacao_repository.py   # Queries no banco local
 ```

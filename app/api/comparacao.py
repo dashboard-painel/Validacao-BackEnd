@@ -6,14 +6,13 @@ from app.repositories.comparacao_repository import (
     buscar_todos_consolidados,
     buscar_historico_por_associacao,
     buscar_ultima_atualizacao,
-    # buscar_por_codigo,
 )
-from app.local_db import buscar_vendas_parceiros, buscar_ultima_atualizacao_vendas_parceiros
+from app.db.local import buscar_vendas_parceiros, buscar_ultima_atualizacao_vendas_parceiros
 
-from app.mappers.comparacao_mapper import montar_resultado_consolidado
-from app.schemas import ComparacaoRequest, ComparacaoResponse, ResultadoConsolidadoResponse, VendasParceirosResponse, VendasParceirosItemResponse
-from app.services.comparacao_service import executar_comparacao
-from app.services.vendas_parceiros_service import executar_vendas_parceiros as executar_vp
+from app.models.comparacao import ComparacaoRequest, ComparacaoResponse, ResultadoConsolidadoResponse
+from app.models.vendas import VendasParceirosResponse, VendasParceirosItemResponse
+from app.core.comparacao import executar_comparacao, montar_resultado_consolidado
+from app.core.vendas import executar_vendas_parceiros as executar_vp
 
 logger = logging.getLogger(__name__)
 
@@ -84,16 +83,6 @@ def ultima_atualizacao() -> dict:
         raise HTTPException(status_code=503, detail=f"Erro ao acessar o banco local. Detalhes: {type(e).__name__}")
 
     return {"atualizado_em": atualizado_em}
-
-# @router.get("/coletor/{codigo}")
-# def coletor_codigo(codigo: str) -> dict:
-#     try:
-#         data_hora_ultima_venda = buscar_por_codigo(codigo)
-#     except Exception as e:
-#         logger.error("Erro ao buscar status do coletor para código %s: %s: %s", codigo, type(e).__name__, e)
-#         raise HTTPException(status_code=503, detail=f"Erro ao acessar o coletor. Detalhes: {type(e).__name__}")
-#
-#     return {"data_hora_ultima_venda": data_hora_ultima_venda}
 
 @router.get("/vendas-parceiros", response_model=VendasParceirosResponse)
 def vendas_parceiros() -> VendasParceirosResponse:

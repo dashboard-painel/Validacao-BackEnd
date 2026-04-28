@@ -6,9 +6,9 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import test_connection
-from app.local_db import init_local_db
-from app.routers import comparar
+from app.db.redshift import test_connection
+from app.db.local import init_local_db
+from app.api import comparacao
 
 load_dotenv()
 
@@ -43,7 +43,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(comparar.router)
+app.include_router(comparacao.router)
 
 
 @app.get("/")
