@@ -1,11 +1,12 @@
+"""Service de comparação entre GoldVendas e SilverSTGN_Dedup."""
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from app.clients.coletor_bi import buscar_por_associacao
 from app.models.comparacao import Divergencia, ResultadoComparacao
 
 from app.repositories.comparacao_repository import (
+    buscar_por_associacao,
     buscar_status_farmacias,
     buscar_classificacao_farmacias,
     buscar_versoes_farmacias,
@@ -78,55 +79,16 @@ def _comparar_resultados(associacao: str) -> ResultadoComparacao:
         r_silver = silver_by_farmacia.get(cod)
 
         if r_gold and not r_silver:
-            divergencias.append(Divergencia(
-                cod_farmacia=cod,
-                nome_farmacia=r_gold.get("nome_farmacia"),
-                cnpj=r_gold.get("cnpj"),
-                sit_contrato=r_gold.get("sit_contrato"),
-                codigo_rede=r_gold.get("codigo_rede"),
-                num_versao=r_gold.get("num_versao"),
-                ultima_venda_GoldVendas=str(r_gold.get("ultima_venda")) if r_gold.get("ultima_venda") else None,
-                ultima_hora_venda_GoldVendas=str(r_gold.get("ultima_hora_venda")) if r_gold.get("ultima_hora_venda") else None,
-                ultima_venda_SilverSTGN_Dedup=None,
-                ultima_hora_venda_SilverSTGN_Dedup=None,
-                tipo_divergencia="apenas_gold_vendas",
-            ))
+            divergencias.append(Divergencia.from_gold_silver(cod, r_gold, None, "apenas_gold_vendas"))
         elif r_silver and not r_gold:
             cadfilia = cadfilia_lookup.get(cod, {})
-            divergencias.append(Divergencia(
-                cod_farmacia=cod,
-                nome_farmacia=cadfilia.get("nome_farmacia"),
-                cnpj=cadfilia.get("cnpj"),
-                sit_contrato=cadfilia.get("sit_contrato"),
-                codigo_rede=cadfilia.get("codigo_rede"),
-                ultima_venda_GoldVendas=None,
-                ultima_hora_venda_GoldVendas=None,
-                ultima_venda_SilverSTGN_Dedup=str(r_silver.get("ultima_venda")) if r_silver.get("ultima_venda") else None,
-                ultima_hora_venda_SilverSTGN_Dedup=str(r_silver.get("ultima_hora_venda")) if r_silver.get("ultima_hora_venda") else None,
-                tipo_divergencia="apenas_silver_stgn_dedup",
-            ))
+            divergencias.append(Divergencia.from_gold_silver(cod, None, r_silver, "apenas_silver_stgn_dedup", cadfilia))
         else:
             venda_gold = str(r_gold.get("ultima_venda")) if r_gold and r_gold.get("ultima_venda") else None
             venda_silver = str(r_silver.get("ultima_venda")) if r_silver and r_silver.get("ultima_venda") else None
 
             if venda_gold != venda_silver:
-                nome = r_gold.get("nome_farmacia") if r_gold else None
-                cnpj = r_gold.get("cnpj") if r_gold else None
-                sit_contrato = r_gold.get("sit_contrato") if r_gold else None
-                codigo_rede = r_gold.get("codigo_rede") if r_gold else None
-                divergencias.append(Divergencia(
-                    cod_farmacia=cod,
-                    nome_farmacia=r_gold.get("nome_farmacia"),
-                    cnpj=r_gold.get("cnpj"),
-                    sit_contrato=r_gold.get("sit_contrato"),
-                    codigo_rede=r_gold.get("codigo_rede"),
-                    num_versao=r_gold.get("num_versao"),
-                    ultima_venda_GoldVendas=venda_gold,
-                    ultima_hora_venda_GoldVendas=str(r_gold.get("ultima_hora_venda")) if r_gold and r_gold.get("ultima_hora_venda") else None,
-                    ultima_venda_SilverSTGN_Dedup=venda_silver,
-                    ultima_hora_venda_SilverSTGN_Dedup=str(r_silver.get("ultima_hora_venda")) if r_silver and r_silver.get("ultima_hora_venda") else None,
-                    tipo_divergencia="data_diferente",
-                ))
+                divergencias.append(Divergencia.from_gold_silver(cod, r_gold, r_silver, "data_diferente"))
 
     resultado = ResultadoComparacao(
         associacao=associacao,
@@ -149,97 +111,64 @@ def _comparar_resultados(associacao: str) -> ResultadoComparacao:
     return resultado
 
 
-def executar_comparacao(associacao: str) -> ComparacaoResponse:
-    logger.info("📥 Comparação iniciada — associacao=%s", associacao)
-    t_req = time.perf_counter()
+def _buscar_apis_externas(farmacias: list[str]) -> tuple[dict, dict, dict, dict]:
+    """Consulta Business Connect, Coletor BI, Sicfarma e versões com executor compartilhado.
 
-    # 1. Comparação Redshift
-    resultado = _comparar_resultados(associacao)
+    Usa um único ThreadPoolExecutor para todas as chamadas por farmácia,
+    evitando pools aninhados e limitando o total de threads.
 
-    # 2. Business Connect + Coletor BI + Sicfarma em paralelo
+    Returns:
+        Tupla (status_dict, resultado_coletor, classificacao_dict, versoes_dict)
+        com fallback seguro em caso de indisponibilidade de qualquer API.
+    """
     logger.info(
         "⏳ Buscando status Business Connect, Coletor BI e Sicfarma em paralelo (%d farmácias)",
-        len(resultado.todas_farmacias),
+        len(farmacias),
     )
     t_parallel = time.perf_counter()
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        future_bc = executor.submit(buscar_status_farmacias, list(resultado.todas_farmacias))
-        future_coletor = executor.submit(buscar_por_associacao, list(resultado.todas_farmacias))
-        future_sicfarma = executor.submit(buscar_classificacao_farmacias, list(resultado.todas_farmacias))
-        future_versoes = executor.submit(buscar_versoes_farmacias, list(resultado.todas_farmacias))
-
+    def _safe_result(future, label: str, fallback):
+        """Coleta resultado de um future com fallback seguro em caso de erro."""
         try:
-            status_dict = future_bc.result()
+            return future.result()
         except Exception as e:
-            logger.warning(
-                "Business Connect indisponível (%.2fs): %s: %s",
-                time.perf_counter() - t_parallel,
-                type(e).__name__,
-                e,
-            )
-            status_dict = {cod: "Indisponível" for cod in resultado.todas_farmacias}
+            logger.warning("%s indisponível (%.2fs): %s: %s", label, time.perf_counter() - t_parallel, type(e).__name__, e)
+            return fallback() if callable(fallback) else fallback
 
-        try:
-            resultado_coletor = future_coletor.result()
-        except Exception as e:
-            logger.warning(
-                "Coletor BI indisponivel (%.2fs): %s: %s",
-                time.perf_counter() - t_parallel,
-                type(e).__name__,
-                e,
-            )
-            resultado_coletor = {}
+    with ThreadPoolExecutor(max_workers=10) as shared_executor:
+        future_bc = shared_executor.submit(buscar_status_farmacias, farmacias, shared_executor)
+        future_coletor = shared_executor.submit(buscar_por_associacao, farmacias, shared_executor)
+        future_sicfarma = shared_executor.submit(buscar_classificacao_farmacias, farmacias, shared_executor)
+        future_versoes = shared_executor.submit(buscar_versoes_farmacias, farmacias, shared_executor)
 
-        try:
-            classificacao_dict = future_sicfarma.result()
-        except Exception as e:
-            logger.warning(
-                "Sicfarma indisponível (%.2fs): %s: %s",
-                time.perf_counter() - t_parallel,
-                type(e).__name__,
-                e,
-            )
-            classificacao_dict = {cod: None for cod in resultado.todas_farmacias}
-
-        try:
-            versoes_dict = future_versoes.result()
-        except Exception as e:
-            logger.warning(
-                "Sicfarma /versoes indisponível (%.2fs): %s: %s",
-                time.perf_counter() - t_parallel,
-                type(e).__name__,
-                e,
-            )
-            versoes_dict = {cod: None for cod in resultado.todas_farmacias}
+        status_dict = _safe_result(future_bc, "Business Connect", lambda: {cod: "Indisponível" for cod in farmacias})
+        resultado_coletor = _safe_result(future_coletor, "Coletor BI", {})
+        classificacao_dict = _safe_result(future_sicfarma, "Sicfarma", lambda: {cod: None for cod in farmacias})
+        versoes_dict = _safe_result(future_versoes, "Sicfarma /versoes", lambda: {cod: None for cod in farmacias})
 
     logger.info("✅ APIs externas consultadas em %.2fs", time.perf_counter() - t_parallel)
+    return status_dict, resultado_coletor, classificacao_dict, versoes_dict
 
-    # Aplicar num_versao do Sicfarma nas divergências e nos resultados gold (antes de persistir)
+
+def _aplicar_versoes(resultado: ResultadoComparacao, versoes_dict: dict) -> None:
+    """Aplica num_versao do Sicfarma nas divergências e nos resultados gold."""
     for d in resultado.divergencias:
         d.num_versao = versoes_dict.get(d.cod_farmacia)
     for r in resultado.resultados_gold_vendas:
         cod = str(r.get("cod_farmacia", "")).strip()
         r["num_versao"] = versoes_dict.get(cod)
 
-    # 4. Persistência
+
+def _persistir_resultados(
+    associacao: str,
+    resultado: ResultadoComparacao,
+    status_dict: dict,
+    resultado_coletor: dict,
+    classificacao_dict: dict,
+) -> None:
+    """Persiste comparação + status no banco local (não crítico — falhas são logadas)."""
     try:
-        divergencias_dict = [
-            {
-                "cod_farmacia": d.cod_farmacia,
-                "nome_farmacia": d.nome_farmacia,
-                "cnpj": d.cnpj,
-                "sit_contrato": d.sit_contrato,
-                "codigo_rede": d.codigo_rede,
-                "num_versao": d.num_versao,
-                "ultima_venda_GoldVendas": d.ultima_venda_GoldVendas,
-                "ultima_hora_venda_GoldVendas": d.ultima_hora_venda_GoldVendas,
-                "ultima_venda_SilverSTGN_Dedup": d.ultima_venda_SilverSTGN_Dedup,
-                "ultima_hora_venda_SilverSTGN_Dedup": d.ultima_hora_venda_SilverSTGN_Dedup,
-                "tipo_divergencia": d.tipo_divergencia,
-            }
-            for d in resultado.divergencias
-        ]
+        divergencias_dict = [d.to_dict() for d in resultado.divergencias]
         resultado.comparacao_id = salvar_comparacao(
             associacao,
             resultado.resultados_gold_vendas,
@@ -249,14 +178,20 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
     except Exception as e:
         logger.warning("Erro ao salvar comparação (não crítico): %s: %s", type(e).__name__, e)
 
-    # 5. Persistir status Business Connect + Coletor BI
     if resultado.comparacao_id is not None:
         try:
             salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict, resultado_coletor, classificacao_dict)
         except Exception as e:
             logger.warning("Erro ao salvar status_farmacias: %s: %s", type(e).__name__, e)
 
-    # 6. Montar divergências
+
+def _montar_response(
+    resultado: ResultadoComparacao,
+    status_dict: dict,
+    resultado_coletor: dict,
+    classificacao_dict: dict,
+) -> ComparacaoResponse:
+    """Monta o ComparacaoResponse final com divergências e status de farmácias."""
     divergencias = []
     for d in resultado.divergencias:
         c_atrasadas, c_sem_dados = camadas_atrasadas(
@@ -267,15 +202,31 @@ def executar_comparacao(associacao: str) -> ComparacaoResponse:
         classificacao = classificacao_dict.get(d.cod_farmacia)
         divergencias.append(montar_divergencia_response(d, c_atrasadas, c_sem_dados, classificacao))
 
-    # 7. Status farmácias
     todas_farmacias = set(status_dict.keys()) | set(resultado_coletor.keys())
     status_farmacias = [
         montar_status_farmacia_response(cod, status_dict.get(cod, "Indisponível"), resultado_coletor.get(cod))
         for cod in sorted(todas_farmacias)
     ]
 
-    # 8. Response final
-    response = montar_comparacao_response(resultado, divergencias, status_farmacias)
+    return montar_comparacao_response(resultado, divergencias, status_farmacias)
+
+
+def executar_comparacao(associacao: str) -> ComparacaoResponse:
+    """Orquestra o fluxo completo de comparação entre GoldVendas e SilverSTGN_Dedup."""
+    logger.info("📥 Comparação iniciada — associacao=%s", associacao)
+    t_req = time.perf_counter()
+
+    resultado = _comparar_resultados(associacao)
+
+    status_dict, resultado_coletor, classificacao_dict, versoes_dict = (
+        _buscar_apis_externas(list(resultado.todas_farmacias))
+    )
+
+    _aplicar_versoes(resultado, versoes_dict)
+
+    _persistir_resultados(associacao, resultado, status_dict, resultado_coletor, classificacao_dict)
+
+    response = _montar_response(resultado, status_dict, resultado_coletor, classificacao_dict)
 
     logger.info("🚀 Comparação finalizada em %.2fs", time.perf_counter() - t_req)
     return response

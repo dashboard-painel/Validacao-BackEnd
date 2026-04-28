@@ -4,7 +4,8 @@ import time
 
 from app.repositories.redshift_repository import execute_vendas_parceiros
 from app.local_db import salvar_vendas_parceiros
-from app.schemas import VendasParceirosItemResponse, VendasParceirosResponse
+from app.mappers.comparacao_mapper import montar_vendas_parceiros_item
+from app.schemas import VendasParceirosResponse
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +25,7 @@ def executar_vendas_parceiros() -> VendasParceirosResponse:
         logger.warning("Erro ao salvar vendas_parceiros (não crítico): %s: %s", type(e).__name__, e)
 
     # Montar response
-    items = [
-        VendasParceirosItemResponse(
-            cod_farmacia=str(r["cod_farmacia"]).strip(),
-            nome_farmacia=r.get("nome_farmacia"),
-            sit_contrato=r.get("sit_contrato"),
-            associacao=str(r.get("associacao", "")).strip(),
-            farmacia=str(r["farmacia"]) if r.get("farmacia") is not None else None,
-            associacao_parceiro=str(r["associacao_parceiro"]) if r.get("associacao_parceiro") else None,
-            ultima_venda_parceiros=str(r["ultima_venda_parceiros"]) if r.get("ultima_venda_parceiros") else None,
-        )
-        for r in resultados
-    ]
+    items = [montar_vendas_parceiros_item(r) for r in resultados]
 
     logger.info("🚀 Vendas Parceiros finalizada em %.2fs — %d registros", time.perf_counter() - t0, len(items))
     return VendasParceirosResponse(

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import test_connection
-from app.local_db import init_local_db
+from app.local_db import init_local_db, close_pool
 from app.routers import comparar
 
 load_dotenv()
@@ -20,15 +20,28 @@ logging.basicConfig(
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Gerencia o ciclo de vida da aplicação.
 
-    Startup: Inicializa as tabelas do banco de dados local.
-    Shutdown: (nenhuma ação necessária)
+    Startup: Verifica PostgreSQL local e inicializa tabelas.
+    Shutdown: Fecha o pool de conexões.
     """
-    init_local_db()
+    try:
+        init_local_db()
+        logger.info("✅ PostgreSQL local conectado e tabelas inicializadas")
+    except Exception as e:
+        logger.error(
+            "❌ Falha ao conectar no PostgreSQL local: %s: %s. "
+            "Verifique se o PostgreSQL está rodando e as variáveis LOCAL_DB_URL, LOCAL_DB_USER, LOCAL_DB_PASS estão corretas.",
+            type(e).__name__, e,
+        )
+        raise SystemExit(1)
     yield
+    close_pool()
 
 
 app = FastAPI(
@@ -41,12 +54,17 @@ app = FastAPI(
 # CORS — permite que o frontend existente consuma a API
 # CORS_ORIGINS pode ser "*" ou lista separada por vírgulas
 cors_origins_env = os.getenv("CORS_ORIGINS", "*")
-allow_origins = ["*"] if cors_origins_env == "*" else [o.strip() for o in cors_origins_env.split(",")]
+if cors_origins_env == "*":
+    allow_origins = ["*"]
+    allow_credentials = False
+else:
+    allow_origins = [o.strip() for o in cors_origins_env.split(",")]
+    allow_credentials = True
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

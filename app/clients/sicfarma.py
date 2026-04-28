@@ -4,12 +4,9 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import dotenv
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
-dotenv.load_dotenv()
 
 SICFARMA_URL = os.getenv("SICFARMA_URL")
 SICFARMA_USERNAME = os.getenv("SICFARMA_USERNAME")
@@ -40,6 +37,7 @@ def _get_with_retry(url: str, **kwargs) -> requests.Response:
     """
     return _SESSION.get(url, **kwargs)
 
+
 _SICFARMA_CLASSIFICATION_MAP: dict[int, str] = {
     1: "GOLD",
     3: "SELECT1",
@@ -55,6 +53,31 @@ _SICFARMA_CLASSIFICATION_MAP: dict[int, str] = {
 }
 
 
+def _sicfarma_get(endpoint: str, cod_farmacia: str, label: str):
+    """Request compartilhado: GET + status check + JSON parse. Retorna dados ou None."""
+    if not SICFARMA_URL:
+        return None
+    url = f"{SICFARMA_URL}/{endpoint}" if endpoint else SICFARMA_URL
+    try:
+        response = _get_with_retry(
+            url,
+            params={"id": cod_farmacia},
+            auth=(SICFARMA_USERNAME, SICFARMA_PASSWORD),
+            timeout=10,
+        )
+    except Exception as e:
+        logger.warning("Sicfarma %s request falhou para farmácia %s: %s", label, cod_farmacia, e)
+        return None
+    if response.status_code != 200:
+        logger.warning("Sicfarma %s request falhou para farmácia %s: HTTP %s", label, cod_farmacia, response.status_code)
+        return None
+    try:
+        return response.json()
+    except Exception as e:
+        logger.warning("Sicfarma %s resposta inválida (JSON) para farmácia %s: %s", label, cod_farmacia, e)
+        return None
+
+
 def buscar_classificacao_por_codigo(cod_farmacia: str) -> str | None:
     """Busca a classificação de uma farmácia pelo código via API Sicfarma.
 
@@ -67,31 +90,8 @@ def buscar_classificacao_por_codigo(cod_farmacia: str) -> str | None:
     Returns:
         Label da classificação (ex: 'GOLD', 'PRIME') ou None em caso de falha ou código desconhecido.
     """
-    try:
-        response = _get_with_retry(
-            SICFARMA_URL,
-            params={"id": cod_farmacia},
-            auth=(SICFARMA_USERNAME, SICFARMA_PASSWORD),
-            timeout=10,
-        )
-    except Exception as e:
-        logger.warning(
-            "Sicfarma request falhou para farmácia %s: %s", cod_farmacia, e
-        )
-        return None
-
-    if response.status_code != 200:
-        logger.warning(
-            "Sicfarma request falhou para farmácia %s: HTTP %s",
-            cod_farmacia,
-            response.status_code,
-        )
-        return None
-
-    try:
-        dados = response.json()
-    except Exception as e:
-        logger.warning("Sicfarma resposta inválida (JSON) para farmácia %s: %s", cod_farmacia, e)
+    dados = _sicfarma_get("", cod_farmacia, "classificação")
+    if dados is None:
         return None
 
     if isinstance(dados, list):
@@ -128,36 +128,8 @@ def buscar_versao_por_codigo(cod_farmacia: str) -> str | None:
     Returns:
         String com a versão do coletor (ex: '1.0.78') ou None em caso de falha ou não encontrado.
     """
-    if not SICFARMA_URL:
-        return None
-
-    url = f"{SICFARMA_URL}/versoes"
-
-    try:
-        response = _get_with_retry(
-            url,
-            params={"id": cod_farmacia},
-            auth=(SICFARMA_USERNAME, SICFARMA_PASSWORD),
-            timeout=10,
-        )
-    except Exception as e:
-        logger.warning(
-            "Sicfarma /versoes request falhou para farmácia %s: %s", cod_farmacia, e
-        )
-        return None
-
-    if response.status_code != 200:
-        logger.warning(
-            "Sicfarma /versoes request falhou para farmácia %s: HTTP %s",
-            cod_farmacia,
-            response.status_code,
-        )
-        return None
-
-    try:
-        dados = response.json()
-    except Exception as e:
-        logger.warning("Sicfarma /versoes resposta inválida (JSON) para farmácia %s: %s", cod_farmacia, e)
+    dados = _sicfarma_get("versoes", cod_farmacia, "/versoes")
+    if dados is None:
         return None
 
     if not isinstance(dados, list):
@@ -171,11 +143,12 @@ def buscar_versao_por_codigo(cod_farmacia: str) -> str | None:
     return None
 
 
-def buscar_versoes_farmacias(codigos: list[str]) -> dict[str, str | None]:
+def buscar_versoes_farmacias(codigos: list[str], executor: ThreadPoolExecutor | None = None) -> dict[str, str | None]:
     """Busca a versão do coletor de múltiplas farmácias em paralelo.
 
     Args:
         codigos: Lista de códigos de farmácia a consultar.
+        executor: ThreadPoolExecutor compartilhado (opcional). Se não fornecido, cria um local.
 
     Returns:
         dict[str, str | None]: Mapeamento {cod_farmacia: num_versao_or_none}
@@ -188,8 +161,8 @@ def buscar_versoes_farmacias(codigos: list[str]) -> dict[str, str | None]:
 
     resultado: dict[str, str | None] = {}
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(buscar_versao_por_codigo, cod): cod for cod in codigos}
+    def _run(exec: ThreadPoolExecutor):
+        futures = {exec.submit(buscar_versao_por_codigo, cod): cod for cod in codigos}
         for future in as_completed(futures):
             cod = futures[future]
             try:
@@ -198,15 +171,22 @@ def buscar_versoes_farmacias(codigos: list[str]) -> dict[str, str | None]:
                 logger.warning("Sicfarma /versoes falhou para farmácia %s: %s", cod, e)
                 resultado[cod] = None
 
+    if executor:
+        _run(executor)
+    else:
+        with ThreadPoolExecutor(max_workers=3) as local_exec:
+            _run(local_exec)
+
     logger.info("✅ Sicfarma /versoes — %d farmácias consultadas em %.2fs", len(resultado), time.perf_counter() - t_inicio)
     return resultado
 
 
-def buscar_classificacao_farmacias(codigos: list[str]) -> dict[str, str | None]:
+def buscar_classificacao_farmacias(codigos: list[str], executor: ThreadPoolExecutor | None = None) -> dict[str, str | None]:
     """Busca a classificação de múltiplas farmácias em paralelo.
 
     Args:
         codigos: Lista de códigos de farmácia a consultar.
+        executor: ThreadPoolExecutor compartilhado (opcional). Se não fornecido, cria um local.
 
     Returns:
         dict[str, str | None]: Mapeamento {cod_farmacia: classificacao_label_or_none}
@@ -219,8 +199,8 @@ def buscar_classificacao_farmacias(codigos: list[str]) -> dict[str, str | None]:
 
     resultado: dict[str, str | None] = {}
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(buscar_classificacao_por_codigo, cod): cod for cod in codigos}
+    def _run(exec: ThreadPoolExecutor):
+        futures = {exec.submit(buscar_classificacao_por_codigo, cod): cod for cod in codigos}
         for future in as_completed(futures):
             cod = futures[future]
             try:
@@ -228,6 +208,12 @@ def buscar_classificacao_farmacias(codigos: list[str]) -> dict[str, str | None]:
             except Exception as e:
                 logger.warning("Sicfarma classificação falhou para farmácia %s: %s", cod, e)
                 resultado[cod] = None
+
+    if executor:
+        _run(executor)
+    else:
+        with ThreadPoolExecutor(max_workers=3) as local_exec:
+            _run(local_exec)
 
     logger.info("✅ Sicfarma — %d farmácias consultadas em %.2fs", len(resultado), time.perf_counter() - t_inicio)
     return resultado

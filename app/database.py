@@ -1,24 +1,28 @@
 """Redshift database connection module."""
 import os
 from contextlib import contextmanager
+from types import MappingProxyType
 from typing import Generator
 
 import redshift_connector
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
 
 
-def get_connection_config() -> dict:
+_connection_config: MappingProxyType | None = None
+
+
+def get_connection_config() -> MappingProxyType:
     """Get Redshift connection configuration from environment variables.
 
     Returns:
-        dict: Connection parameters for redshift_connector.connect()
+        MappingProxyType: Immutable connection parameters for redshift_connector.connect()
 
     Raises:
         ValueError: If required environment variables are missing
     """
+    global _connection_config
+    if _connection_config is not None:
+        return _connection_config
+
     required_vars = ["REDSHIFT_HOST", "REDSHIFT_USER"]
     missing = [var for var in required_vars if not os.getenv(var)]
 
@@ -35,13 +39,14 @@ def get_connection_config() -> dict:
     if missing:
         raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
 
-    return {
+    _connection_config = MappingProxyType({
         "host": os.getenv("REDSHIFT_HOST"),
         "port": int(os.getenv("REDSHIFT_PORT", "5439")),
         "database": database,
         "user": os.getenv("REDSHIFT_USER"),
         "password": password,
-    }
+    })
+    return _connection_config
 
 
 @contextmanager
