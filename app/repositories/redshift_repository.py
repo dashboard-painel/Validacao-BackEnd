@@ -5,6 +5,32 @@ from app.database import get_connection
 
 logger = logging.getLogger(__name__)
 
+
+def _execute_query(sql: str, params: tuple | None, label: str) -> list[dict]:
+    """Executa uma query no Redshift e retorna lista de dicts.
+
+    Args:
+        sql: Query SQL a executar
+        params: Parâmetros para a query (None se sem parâmetros)
+        label: Label para logs (ex: "associacao.vendas")
+
+    Returns:
+        Lista de dicionários com os resultados
+    """
+    logger.info("⏳ Aguardando resposta Redshift [%s]...", label)
+    t0 = time.perf_counter()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if params is not None:
+            cursor.execute(sql, params)
+        else:
+            cursor.execute(sql)
+        column_names = [desc[0] for desc in cursor.description]
+        rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
+    elapsed = time.perf_counter() - t0
+    logger.info("✅ Redshift [%s] respondeu em %.2fs — %d registros retornados", label, elapsed, len(rows))
+    return rows
+
 QUERY_GOLD_VENDAS = """
 SELECT
     cod_farmacia,
@@ -83,17 +109,22 @@ GROUP BY
 ORDER BY ultima_venda_parceiros DESC;
 """
 
+
 def execute_gold_vendas(associacao: str) -> list[dict]:
-    logger.info("⏳ Aguardando resposta Redshift [associacao.vendas] — associacao=%s...", associacao)
-    t0 = time.perf_counter()
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(QUERY_GOLD_VENDAS, (associacao,associacao))
-        column_names = [desc[0] for desc in cursor.description]
-        rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
-    elapsed = time.perf_counter() - t0
-    logger.info("✅ Redshift [associacao.vendas] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
-    return rows
+    """Executa a query na tabela associacao.vendas (GoldVendas) no Redshift.
+
+    Retorna a última venda registrada por farmácia (cod_farmacia), sem filtro de data.
+    Dados cadastrais (nome_farmacia, cnpj, sit_contrato, codigo_rede) são obtidos via
+    LEFT JOIN com associacao.dimensao_cadastro_lojas.
+
+    Args:
+        associacao: Código da associação para filtrar
+
+    Returns:
+        Lista de dicionários com chaves: cod_farmacia, nome_farmacia, cnpj,
+        sit_contrato, codigo_rede, ultima_venda, ultima_hora_venda
+    """
+    return _execute_query(QUERY_GOLD_VENDAS, (associacao, associacao), f"associacao.vendas — associacao={associacao}")
 
 
 def execute_dimensao_por_codigos(codigos: list[str]) -> dict[str, dict]:
@@ -133,6 +164,47 @@ def execute_dimensao_por_codigos(codigos: list[str]) -> dict[str, dict]:
             for row in cursor.fetchall()
         }
 
+        # Consulta cadfilia se houver gaps de nome, CNPJ ou sit_contrato na dimensao
+        codigos_com_gap = [
+            cod for cod in codigos
+            if not dimensao.get(str(cod).strip(), {}).get("nome_farmacia")
+            or not dimensao.get(str(cod).strip(), {}).get("cnpj")
+            or not dimensao.get(str(cod).strip(), {}).get("sit_contrato")
+        ]
+        cadfilia: dict[str, dict] = {}
+        if codigos_com_gap:
+            placeholders_gap = ",".join(["%s"] * len(codigos_com_gap))
+            query_cadfilia = f"""
+                SELECT cod_farmacia,
+                       MAX(COALESCE(nom_fantasia, raz_social)) AS nome_farmacia,
+                       MAX(num_cnpj) AS cnpj,
+                       MAX(flg_ativo) AS flg_ativo
+                FROM silver.cadfilia_staging_dedup
+                WHERE cod_farmacia IN ({placeholders_gap})
+                GROUP BY cod_farmacia
+            """
+            cursor.execute(query_cadfilia, codigos_com_gap)
+            cadfilia = {
+                str(row[0]).strip(): {"nome_farmacia": row[1], "cnpj": row[2], "flg_ativo": row[3]}
+                for row in cursor.fetchall()
+            }
+
+    # Merge: dimensao como base, cadfilia preenche nome/cnpj nulos
+    todos_codigos = set(str(c).strip() for c in codigos)
+    resultado = {}
+    for cod in todos_codigos:
+        d = dimensao.get(cod, {})
+        c = cadfilia.get(cod, {})
+        sit_contrato = d.get("sit_contrato")
+        if not sit_contrato and c.get("flg_ativo"):
+            sit_contrato = "ATIVO" if str(c["flg_ativo"]).strip().upper() == "A" else None
+        resultado[cod] = {
+            "nome_farmacia": d.get("nome_farmacia") or c.get("nome_farmacia"),
+            "cnpj": d.get("cnpj") or c.get("cnpj"),
+            "sit_contrato": sit_contrato,
+            "codigo_rede": d.get("codigo_rede"),
+        }
+
     elapsed = time.perf_counter() - t0
     logger.info(
         "✅ Redshift [dimensao_cadastro_lojas] respondeu em %.2fs — %d registros",
@@ -142,27 +214,29 @@ def execute_dimensao_por_codigos(codigos: list[str]) -> dict[str, dict]:
     return resultado
 
 
-# def execute_silver_stgn_dedup(associacao: str) -> list[dict]:
-#     logger.info("⏳ Aguardando resposta Redshift [silver.cadcvend_staging_dedup] — associacao=%s...", associacao)
-#     t0 = time.perf_counter()
-#     with get_connection() as conn:
-#         cursor = conn.cursor()
-#         cursor.execute(QUERY_SILVER_STGN_DEDUP, (associacao,))
-#         column_names = [desc[0] for desc in cursor.description]
-#         rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
-#     elapsed = time.perf_counter() - t0
-#     logger.info("✅ Redshift [silver.cadcvend_staging_dedup] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
-#     return rows
+def execute_silver_stgn_dedup(associacao: str) -> list[dict]:
+    """Executa a query na tabela silver.cadcvend_staging_dedup (SilverSTGN_Dedup) no Redshift.
+
+    Retorna a última venda registrada por farmácia (cod_farmacia), sem filtro de data.
+
+    Args:
+        associacao: Código da associação para filtrar
+
+    Returns:
+        Lista de dicionários com chaves: cod_farmacia, ultima_venda,
+        ultima_hora_venda
+    """
+    return _execute_query(QUERY_SILVER_STGN_DEDUP, (associacao,), f"silver.cadcvend_staging_dedup — associacao={associacao}")
 
 
 def execute_vendas_parceiros() -> list[dict]:
-    logger.info("⏳ Aguardando resposta Redshift [associacao.vendas_parceiros]...")
-    t0 = time.perf_counter()
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(QUERY_VENDAS_PARCEIROS)
-        column_names = [desc[0] for desc in cursor.description]
-        rows = [dict(zip(column_names, row)) for row in cursor.fetchall()]
-    elapsed = time.perf_counter() - t0
-    logger.info("✅ Redshift [associacao.vendas_parceiros] respondeu em %.2fs — %d registros retornados", elapsed, len(rows))
-    return rows
+    """Executa a query de vendas_parceiros JOIN dimensao_cadastro_lojas no Redshift.
+
+    Retorna dados cadastrais da farmácia + última venda em vendas_parceiros,
+    cruzando pelo CNPJ entre as tabelas. Sem filtro — traz todas as redes.
+
+    Returns:
+        Lista de dicionários com chaves: cod_farmacia, nome_farmacia, sit_contrato,
+        associacao, farmacia, associacao_parceiro, ultima_venda_parceiros
+    """
+    return _execute_query(QUERY_VENDAS_PARCEIROS, None, "associacao.vendas_parceiros")

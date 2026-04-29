@@ -1,5 +1,9 @@
-from datetime import date, datetime, timedelta
+"""Utilitários de domínio compartilhados entre camadas."""
+import logging
+from datetime import date, timedelta
 from typing import Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def camadas_atrasadas(
@@ -20,7 +24,7 @@ def camadas_atrasadas(
                 if date.fromisoformat(str(d_str)[:10]) < ontem:
                     atrasadas.append(camada)
             except ValueError:
-                pass
+                logger.warning("Data inválida ignorada para camada %s: %r", camada, d_str)
 
     if coletor_novo and coletor_novo.startswith("Pendente de envio no dia "):
         data_api = coletor_novo.removeprefix("Pendente de envio no dia ").strip()
@@ -28,6 +32,6 @@ def camadas_atrasadas(
             if datetime.strptime(data_api, "%d/%m/%Y %H:%M:%S").date() < ontem:
                 atrasadas.append("API")
         except ValueError:
-            pass
+            logger.warning("Data inválida ignorada para camada API: %r", data_api)
 
     return (atrasadas or None, sem_dados or None)

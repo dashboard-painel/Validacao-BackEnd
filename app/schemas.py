@@ -29,11 +29,11 @@ class ComparacaoRequest(BaseModel):
 
 class DivergenciaResponse(BaseModel):
 
-    cod_farmacia: int = Field(..., description="Código da farmácia")
+    cod_farmacia: str = Field(..., description="Código da farmácia")
     nome_farmacia: Optional[str] = Field(None, description="Nome da farmácia (quando disponível)")
     cnpj: Optional[str] = Field(None, description="CNPJ da farmácia (quando disponível)")
     sit_contrato: Optional[str] = Field(None, description="Situação do contrato da farmácia (quando disponível)")
-    codigo_rede: Optional[int] = Field(None, description="Código da rede da farmácia (quando disponível)")
+    codigo_rede: Optional[str] = Field(None, description="Código da rede da farmácia (quando disponível)")
     num_versao: Optional[str] = Field(None, description="Versão do coletor da farmácia (quando disponível)")
     ultima_venda_GoldVendas: Optional[str] = Field(None, description="Data da última venda em associacao.vendas (YYYY-MM-DD)")
     ultima_hora_venda_GoldVendas: Optional[str] = Field(None, description="Hora da última venda em associacao.vendas")
@@ -152,6 +152,7 @@ class VendasParceirosItemResponse(BaseModel):
     farmacia: Optional[str] = Field(None, description="Identificador da farmácia em vendas_parceiros")
     associacao_parceiro: Optional[str] = Field(None, description="Associação em vendas_parceiros")
     ultima_venda_parceiros: Optional[str] = Field(None, description="Data/hora da última venda em vendas_parceiros")
+
 
 class VendasParceirosResponse(BaseModel):
     total: int = Field(..., ge=0, description="Total de registros retornados")

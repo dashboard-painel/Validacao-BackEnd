@@ -8,7 +8,12 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-_BC_BASE_URL = "https://business-connect.triercloud.com.br/v1"
+_BC_BASE_URL = os.getenv("BC_BASE_URL", "https://business-connect.triercloud.com.br/v1")
+
+
+class BusinessConnectAuthError(Exception):
+    """Erro de autenticação no Business Connect."""
+    pass
 
 
 def _formatar_data_upload(raw: str) -> str:
@@ -36,7 +41,7 @@ def get_bearer_token() -> str:
         str: Bearer token para usar no header Authorization
 
     Raises:
-        Exception: Se a autenticação falhar (status HTTP != 200)
+        BusinessConnectAuthError: Se a autenticação falhar (status HTTP != 200)
     """
     username = os.getenv("BC_USERNAME", "")
     password = os.getenv("BC_PASSWORD", "")
@@ -48,7 +53,7 @@ def get_bearer_token() -> str:
     )
 
     if response.status_code != 200:
-        raise Exception(
+        raise BusinessConnectAuthError(
             f"Business Connect auth falhou: HTTP {response.status_code} — {response.text[:300]}"
         )
 
@@ -56,7 +61,7 @@ def get_bearer_token() -> str:
 
     token = data.get("access") or data.get("access_token") or data.get("token") or data.get("accessToken")
     if not token:
-        raise Exception(
+        raise BusinessConnectAuthError(
             f"Business Connect auth: token não encontrado na resposta. Chaves disponíveis: {list(data.keys())}"
         )
     return token
@@ -100,8 +105,22 @@ def get_status_farmacia(cod_farmacia: str, token: str) -> str:
     return "Sem pendências"
 
 
-def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
+def buscar_status_farmacias(codigos: list[str], executor: ThreadPoolExecutor | None = None) -> dict[str, str]:
+    """Obtém o status de migração para uma lista de farmácias em paralelo.
 
+    Obtém o Bearer token UMA única vez e reutiliza para todas as consultas.
+    Se a lista de códigos estiver vazia, retorna dict vazio sem fazer requests.
+
+    Args:
+        codigos: Lista de códigos de farmácia a consultar
+        executor: ThreadPoolExecutor compartilhado (opcional). Se não fornecido, cria um local.
+
+    Returns:
+        dict[str, str]: Mapeamento {cod_farmacia: coletor_novo}
+
+    Raises:
+        BusinessConnectAuthError: Se a autenticação falhar
+    """
     if not codigos:
         return {}
 
@@ -112,8 +131,9 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
 
     resultado: dict[str, str] = {}
     t_parallel = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(get_status_farmacia, cod, token): cod for cod in codigos}
+
+    def _run(exec: ThreadPoolExecutor):
+        futures = {exec.submit(get_status_farmacia, cod, token): cod for cod in codigos}
         for future in as_completed(futures):
             cod = futures[future]
             try:
@@ -121,6 +141,12 @@ def buscar_status_farmacias(codigos: list[str]) -> dict[str, str]:
             except Exception as e:
                 logger.warning("Erro ao buscar status farmácia %s: %s", cod, e)
                 resultado[cod] = "Sem pendências"
+
+    if executor:
+        _run(executor)
+    else:
+        with ThreadPoolExecutor(max_workers=3) as local_exec:
+            _run(local_exec)
 
     logger.info("✅ Business Connect — %d farmácias consultadas em %.2fs", len(resultado), time.perf_counter() - t_parallel)
     return resultado
