@@ -1,4 +1,3 @@
-"""FastAPI application entry point."""
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -51,8 +50,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — permite que o frontend existente consuma a API
-# CORS_ORIGINS pode ser "*" ou lista separada por vírgulas
 cors_origins_env = os.getenv("CORS_ORIGINS", "*")
 if cors_origins_env == "*":
     allow_origins = ["*"]
@@ -74,7 +71,6 @@ app.include_router(comparar.router)
 
 @app.get("/")
 async def root():
-    """Root endpoint - API information."""
     return {
         "name": "Validacao-BackEnd",
         "version": "0.1.0",

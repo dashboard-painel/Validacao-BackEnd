@@ -67,7 +67,7 @@ def _sanitize_cnpj(cnpj: Optional[str]) -> Optional[str]:
 
 
 def init_local_db():
-    """Cria as tabelas necessárias no PostgreSQL local se não existirem."""
+
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -80,7 +80,6 @@ def init_local_db():
                     total_divergencias INTEGER NOT NULL
                 );
 
-                -- Dados brutos de cada fonte (mantidos para auditoria/debug)
                 CREATE TABLE IF NOT EXISTS resultados_gold_vendas (
                     id SERIAL PRIMARY KEY,
                     comparacao_id INTEGER REFERENCES comparacoes(id),
@@ -105,8 +104,6 @@ def init_local_db():
                     UNIQUE (associacao, cod_farmacia)
                 );
 
-                -- Estado atual consolidado de cada farmácia: dados de ambas as fontes,
-                -- tipo de divergência e status dos coletores (Business Connect + Coletor BI).
                 CREATE TABLE IF NOT EXISTS farmacias (
                     id SERIAL PRIMARY KEY,
                     comparacao_id INTEGER REFERENCES comparacoes(id),
@@ -304,22 +301,6 @@ def salvar_comparacao(
     resultados_silver_stgn_dedup: list[dict],
     divergencias: list[dict],
 ) -> int:
-    """Salva os resultados da comparação no PostgreSQL local.
-
-    comparacoes é append-only: cada rodada gera um novo ID (histórico de execuções).
-    As tabelas filhas usam UPSERT em (associacao, cod_farmacia), preservando os IDs
-    das farmácias entre rodadas. comparacao_id nas filhas aponta para a rodada mais recente.
-    Farmácias que desapareceram do novo resultado são removidas.
-
-    Args:
-        associacao: Código da associação comparada
-        resultados_gold_vendas: Lista de dicts com resultados de associacao.vendas
-        resultados_silver_stgn_dedup: Lista de dicts com resultados de silver.cadcvend_staging_dedup
-        divergencias: Lista de dicts com as divergências encontradas
-
-    Returns:
-        int: ID da nova comparação criada em comparacoes
-    """
 
     with get_local_connection() as conn:
         with conn.cursor() as cur:
@@ -339,7 +320,6 @@ def salvar_comparacao(
 
 
 def buscar_ultima_atualizacao() -> Optional[str]:
-    """Retorna a data/hora da comparação mais recente entre todas as associações."""
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT MAX(executado_em)::text FROM comparacoes")
@@ -348,7 +328,6 @@ def buscar_ultima_atualizacao() -> Optional[str]:
 
 
 def buscar_ultima_atualizacao_vendas_parceiros() -> Optional[str]:
-    """Retorna a data/hora da atualização mais recente de vendas_parceiros."""
     with get_local_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT MAX(atualizado_em)::text FROM resultados_vendas_parceiros")
@@ -412,11 +391,8 @@ def salvar_status_farmacias(
     coletor_bi: dict[str, str] | None = None,
     classificacao_dict: dict[str, str | None] | None = None,
 ) -> None:
-    """Atualiza o status dos coletores (Business Connect + Coletor BI) em farmacias."""
     if not status_farmacias:
         return
-
-    coletor_bi = coletor_bi or {}
 
     with get_local_connection() as conn:
         with conn.cursor() as cur:
@@ -468,7 +444,6 @@ def salvar_vendas_parceiros(resultados: list[dict]) -> int:
 
 
 def buscar_vendas_parceiros() -> list[dict]:
-    """Retorna todos os resultados de vendas_parceiros persistidos."""
     with get_local_connection() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""

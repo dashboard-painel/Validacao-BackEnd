@@ -11,14 +11,7 @@ def camadas_atrasadas(
     data_silver: Optional[str],
     coletor_novo: Optional[str],
 ) -> Tuple[Optional[list[str]], Optional[list[str]]]:
-    """Retorna (camadas_atrasadas, camadas_sem_dados).
 
-    camadas_atrasadas — tem dado mas é velho (data < D-1):
-    - GoldVendas, SilverSTGN_Dedup, API
-
-    camadas_sem_dados — sem nenhum registro:
-    - GoldVendas, SilverSTGN_Dedup (campo null)
-    """
     ontem = date.today() - timedelta(days=1)
     atrasadas: list[str] = []
     sem_dados: list[str] = []
@@ -36,7 +29,7 @@ def camadas_atrasadas(
     if coletor_novo and coletor_novo.startswith("Pendente de envio no dia "):
         data_api = coletor_novo.removeprefix("Pendente de envio no dia ").strip()
         try:
-            if date.fromisoformat(data_api[:10]) < ontem:
+            if datetime.strptime(data_api, "%d/%m/%Y %H:%M:%S").date() < ontem:
                 atrasadas.append("API")
         except ValueError:
             logger.warning("Data inválida ignorada para camada API: %r", data_api)

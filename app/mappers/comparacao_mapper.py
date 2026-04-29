@@ -25,8 +25,8 @@ def montar_divergencia_response(
         num_versao=d.num_versao,
         ultima_venda_GoldVendas=d.ultima_venda_GoldVendas,
         ultima_hora_venda_GoldVendas=d.ultima_hora_venda_GoldVendas,
-        ultima_venda_SilverSTGN_Dedup=d.ultima_venda_SilverSTGN_Dedup,
-        ultima_hora_venda_SilverSTGN_Dedup=d.ultima_hora_venda_SilverSTGN_Dedup,
+        # ultima_venda_SilverSTGN_Dedup=d.ultima_venda_SilverSTGN_Dedup,  # silver desativado
+        # ultima_hora_venda_SilverSTGN_Dedup=d.ultima_hora_venda_SilverSTGN_Dedup,  # silver desativado
         tipo_divergencia=d.tipo_divergencia,
         camadas_atrasadas=lista_camadas_atrasadas,
         camadas_sem_dados=camadas_sem_dados,
@@ -52,7 +52,7 @@ def montar_comparacao_response(
     return ComparacaoResponse(
         associacao=resultado.associacao,
         total_gold_vendas=resultado.total_gold_vendas,
-        total_silver_stgn_dedup=resultado.total_silver_stgn_dedup,
+        # total_silver_stgn_dedup=resultado.total_silver_stgn_dedup,  # silver desativado
         total_divergencias=resultado.total_divergencias,
         comparacao_id=resultado.comparacao_id,
         divergencias=divergencias,

@@ -1,1 +1,0 @@
-"""Validacao-BackEnd API package."""

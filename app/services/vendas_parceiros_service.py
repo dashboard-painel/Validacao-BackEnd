@@ -1,4 +1,3 @@
-"""Service dedicado para consulta e persistência de vendas_parceiros."""
 import logging
 import time
 
@@ -11,13 +10,12 @@ logger = logging.getLogger(__name__)
 
 
 def executar_vendas_parceiros() -> VendasParceirosResponse:
-    """Executa query vendas_parceiros no Redshift, persiste e retorna resultado."""
+
     logger.info("📥 Vendas Parceiros iniciada — buscando todas as redes")
     t0 = time.perf_counter()
 
     resultados = execute_vendas_parceiros()
 
-    # Persistência
     try:
         salvar_vendas_parceiros(resultados)
         logger.info("💾 Vendas Parceiros persistidas — %d registros", len(resultados))

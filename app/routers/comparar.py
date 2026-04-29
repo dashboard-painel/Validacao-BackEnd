@@ -11,7 +11,7 @@ from app.repositories.comparacao_repository import (
     buscar_todos_consolidados,
     buscar_historico_por_associacao,
     buscar_ultima_atualizacao,
-    buscar_por_codigo,
+    # buscar_por_codigo,
 )
 from app.local_db import buscar_vendas_parceiros, buscar_ultima_atualizacao_vendas_parceiros
 

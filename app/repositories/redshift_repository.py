@@ -1,4 +1,3 @@
-"""Módulo de queries SQL para execução no Redshift."""
 import logging
 import time
 
@@ -59,34 +58,34 @@ FROM (
         ON v.codigo = d.cod_farmacia
         AND v.associacao = %s
     WHERE d.codigo_rede = %s
-    AND d.sistema = 'TRIER' -- filtro para remover farmacias parceiras
+    AND d.sistema = 'TRIER' -- filtro
 ) sub
 WHERE rn = 1
 ORDER BY ultima_venda DESC, ultima_hora_venda DESC;
 """
 
-QUERY_SILVER_STGN_DEDUP = """
-SELECT
-    cod_farmacia,
-    ultima_venda,
-    ultima_hora_venda
-FROM (
-    SELECT
-        codigo_farmacia AS cod_farmacia,
-        dat_emissao AS ultima_venda,
-        hor_emissao AS ultima_hora_venda,
-        ROW_NUMBER() OVER (
-            PARTITION BY codigo_farmacia
-            ORDER BY dat_emissao DESC, hor_emissao DESC
-        ) AS rn
-    FROM
-        silver.cadcvend_staging_dedup
-    WHERE
-        associacao = %s
-) sub
-WHERE rn = 1
-ORDER BY ultima_venda DESC, ultima_hora_venda DESC;
-"""
+# QUERY_SILVER_STGN_DEDUP = """
+# SELECT
+#     cod_farmacia,
+#     ultima_venda,
+#     ultima_hora_venda
+# FROM (
+#     SELECT
+#         codigo_farmacia AS cod_farmacia,
+#         dat_emissao AS ultima_venda,
+#         hor_emissao AS ultima_hora_venda,
+#         ROW_NUMBER() OVER (
+#             PARTITION BY codigo_farmacia
+#             ORDER BY dat_emissao DESC, hor_emissao DESC
+#         ) AS rn
+#     FROM
+#         silver.cadcvend_staging_dedup
+#     WHERE
+#         associacao = %s
+# ) sub
+# WHERE rn = 1
+# ORDER BY ultima_venda DESC, ultima_hora_venda DESC;
+# """
 
 QUERY_VENDAS_PARCEIROS = """
 SELECT
@@ -128,20 +127,7 @@ def execute_gold_vendas(associacao: str) -> list[dict]:
     return _execute_query(QUERY_GOLD_VENDAS, (associacao, associacao), f"associacao.vendas — associacao={associacao}")
 
 
-def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
-    """Busca dados cadastrais de farmácias priorizando associacao.dimensao_cadastro_lojas
-    e usando silver.cadfilia_staging_dedup apenas para preencher campos nulos.
-
-    Fluxo:
-    - dimensao_cadastro_lojas é a fonte principal (inclui sit_contrato e codigo_rede)
-    - cadfilia_staging_dedup preenche apenas nome_farmacia e cnpj quando nulos na dimensao
-
-    Args:
-        codigos: Lista de cod_farmacia a consultar
-
-    Returns:
-        Dict {cod_farmacia: {"nome_farmacia": ..., "cnpj": ..., "sit_contrato": ..., "codigo_rede": ...}}
-    """
+def execute_dimensao_por_codigos(codigos: list[str]) -> dict[str, dict]:
     if not codigos:
         return {}
 
@@ -160,16 +146,15 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
     """
 
     logger.info(
-        "⏳ Aguardando resposta Redshift [dimensao_cadastro_lojas + cadfilia gap-fill] — %d códigos...",
+        "⏳ Aguardando resposta Redshift [dimensao_cadastro_lojas] — %d códigos...",
         len(codigos),
     )
     t0 = time.perf_counter()
 
     with get_connection() as conn:
         cursor = conn.cursor()
-
         cursor.execute(query_dimensao, list(codigos))
-        dimensao = {
+        resultado = {
             str(row[0]).strip(): {
                 "nome_farmacia": row[1],
                 "cnpj": row[2],
@@ -222,10 +207,9 @@ def execute_cadfilia_por_codigos(codigos: list[str]) -> dict[str, dict]:
 
     elapsed = time.perf_counter() - t0
     logger.info(
-        "✅ Redshift [dimensao + cadfilia gap-fill] respondeu em %.2fs — %d registros (gap-fill em %d)",
+        "✅ Redshift [dimensao_cadastro_lojas] respondeu em %.2fs — %d registros",
         elapsed,
         len(resultado),
-        len(codigos_com_gap),
     )
     return resultado
 

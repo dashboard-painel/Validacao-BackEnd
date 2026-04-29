@@ -1,4 +1,3 @@
-"""Redshift database connection module."""
 import os
 from contextlib import contextmanager
 from types import MappingProxyType
@@ -26,12 +25,10 @@ def get_connection_config() -> MappingProxyType:
     required_vars = ["REDSHIFT_HOST", "REDSHIFT_USER"]
     missing = [var for var in required_vars if not os.getenv(var)]
 
-    # Suporta REDSHIFT_DATABASE ou REDSHIFT_NAME
     database = os.getenv("REDSHIFT_DATABASE") or os.getenv("REDSHIFT_NAME")
     if not database:
         missing.append("REDSHIFT_DATABASE (or REDSHIFT_NAME)")
 
-    # Suporta REDSHIFT_PASSWORD ou REDSHIFT_PASS
     password = os.getenv("REDSHIFT_PASSWORD") or os.getenv("REDSHIFT_PASS")
     if not password:
         missing.append("REDSHIFT_PASSWORD (or REDSHIFT_PASS)")
@@ -51,16 +48,7 @@ def get_connection_config() -> MappingProxyType:
 
 @contextmanager
 def get_connection() -> Generator[redshift_connector.Connection, None, None]:
-    """Get a Redshift database connection as a context manager.
 
-    Yields:
-        redshift_connector.Connection: Active database connection
-
-    Example:
-        with get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-    """
     config = get_connection_config()
     conn = redshift_connector.connect(**config)
     try:

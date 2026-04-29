@@ -15,8 +15,8 @@ from app.repositories.comparacao_repository import (
 )
 from app.repositories.redshift_repository import (
     execute_gold_vendas,
-    execute_silver_stgn_dedup,
-    execute_cadfilia_por_codigos,
+    # execute_silver_stgn_dedup,
+    execute_dimensao_por_codigos,
 )
 from app.mappers.comparacao_mapper import (
     montar_comparacao_response,
@@ -30,53 +30,34 @@ logger = logging.getLogger(__name__)
 
 
 def _comparar_resultados(associacao: str) -> ResultadoComparacao:
-    """Executa as queries no Redshift e compara os resultados por cod_farmacia.
 
-    Busca a última venda registrada por farmácia em cada fonte (sem filtro de data)
-    e identifica 3 tipos de divergência em ultima_venda:
-    - data_diferente: presente em ambas mas com datas distintas
-    - apenas_gold_vendas: presente somente em associacao.vendas
-    - apenas_silver_stgn_dedup: presente somente em silver.cadcvend_staging_dedup
-    """
     logger.info("🔍 Iniciando comparação — associacao=%s", associacao)
     t_total = time.perf_counter()
 
     resultados_gold_vendas = execute_gold_vendas(associacao)
-    resultados_silver_stgn_dedup = execute_silver_stgn_dedup(associacao)
+    # resultados_silver_stgn_dedup = execute_silver_stgn_dedup(associacao)
 
     gold_by_farmacia = {str(r["cod_farmacia"]).strip(): r for r in resultados_gold_vendas}
-    silver_by_farmacia = {str(r["cod_farmacia"]).strip(): r for r in resultados_silver_stgn_dedup}
+    # silver_by_farmacia = {str(r["cod_farmacia"]).strip(): r for r in resultados_silver_stgn_dedup}
 
-    todas_farmacias = set(gold_by_farmacia.keys()) | set(silver_by_farmacia.keys())
+    todas_farmacias = set(gold_by_farmacia.keys())
+    # | set(silver_by_farmacia.keys())
 
     # Lookup cadastral para farmácias silver-only (nome, cnpj, sit_contrato, codigo_rede)
-    silver_only_codes = [cod for cod in silver_by_farmacia if cod not in gold_by_farmacia]
-    cadfilia_lookup = execute_cadfilia_por_codigos(silver_only_codes)
-    logger.info(
-        "cadfilia lookup — silver_only_codes=%d, encontrados=%d | exemplos codes: %s",
-        len(silver_only_codes),
-        len(cadfilia_lookup),
-        silver_only_codes[:5],
-    )
-
-    # Fallback de sit_contrato para farmácias gold com valor nulo na dimensao
-    gold_sem_contrato = [cod for cod, r in gold_by_farmacia.items() if not r.get("sit_contrato")]
-    if gold_sem_contrato:
-        gold_fallback = execute_cadfilia_por_codigos(gold_sem_contrato)
-        for cod, dados in gold_fallback.items():
-            if dados.get("sit_contrato") and cod in gold_by_farmacia:
-                gold_by_farmacia[cod]["sit_contrato"] = dados["sit_contrato"]
-        logger.info(
-            "fallback sit_contrato gold — %d farmácias consultadas, %d preenchidas",
-            len(gold_sem_contrato),
-            sum(1 for cod in gold_sem_contrato if gold_by_farmacia.get(cod, {}).get("sit_contrato")),
-        )
+    # silver_only_codes = [cod for cod in silver_by_farmacia if cod not in gold_by_farmacia]
+    # cadfilia_lookup = execute_dimensao_por_codigos(silver_only_codes)
+    # logger.info(
+    #     "cadfilia lookup — silver_only_codes=%d, encontrados=%d | exemplos codes: %s",
+    #     len(silver_only_codes),
+    #     len(cadfilia_lookup),
+    #     silver_only_codes[:5],
+    # )
 
     divergencias = []
 
     for cod in todas_farmacias:
         r_gold = gold_by_farmacia.get(cod)
-        r_silver = silver_by_farmacia.get(cod)
+        # r_silver = silver_by_farmacia.get(cod)
 
         if r_gold and not r_silver:
             divergencias.append(Divergencia.from_gold_silver(cod, r_gold, None, "apenas_gold_vendas"))
@@ -93,19 +74,19 @@ def _comparar_resultados(associacao: str) -> ResultadoComparacao:
     resultado = ResultadoComparacao(
         associacao=associacao,
         total_gold_vendas=len(resultados_gold_vendas),
-        total_silver_stgn_dedup=len(resultados_silver_stgn_dedup),
+        # total_silver_stgn_dedup=len(resultados_silver_stgn_dedup),  # silver desativado
         total_divergencias=len(divergencias),
         divergencias=divergencias,
         todas_farmacias=todas_farmacias,
         resultados_gold_vendas=resultados_gold_vendas,
-        resultados_silver_stgn_dedup=resultados_silver_stgn_dedup,
+        # resultados_silver_stgn_dedup=resultados_silver_stgn_dedup,  # silver desativado
     )
 
     logger.info(
-        "🏁 Comparação concluída em %.2fs — gold=%d, silver=%d, divergências=%d",
+        "🏁 Comparação concluída em %.2fs — gold=%d, divergências=%d",
         time.perf_counter() - t_total,
         resultado.total_gold_vendas,
-        resultado.total_silver_stgn_dedup,
+        # resultado.total_silver_stgn_dedup,  # silver desativado
         resultado.total_divergencias,
     )
     return resultado
@@ -172,7 +153,7 @@ def _persistir_resultados(
         resultado.comparacao_id = salvar_comparacao(
             associacao,
             resultado.resultados_gold_vendas,
-            resultado.resultados_silver_stgn_dedup,
+            [],  # silver desativado (resultados_silver_stgn_dedup)
             divergencias_dict,
         )
     except Exception as e:
@@ -180,7 +161,7 @@ def _persistir_resultados(
 
     if resultado.comparacao_id is not None:
         try:
-            salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict, resultado_coletor, classificacao_dict)
+            salvar_status_farmacias(resultado.comparacao_id, resultado.associacao, status_dict, None, classificacao_dict)  # coletor_bi desativado
         except Exception as e:
             logger.warning("Erro ao salvar status_farmacias: %s: %s", type(e).__name__, e)
 
@@ -196,7 +177,7 @@ def _montar_response(
     for d in resultado.divergencias:
         c_atrasadas, c_sem_dados = camadas_atrasadas(
             d.ultima_venda_GoldVendas,
-            d.ultima_venda_SilverSTGN_Dedup,
+            None,  # silver desativado (ultima_venda_SilverSTGN_Dedup)
             status_dict.get(d.cod_farmacia),
         )
         classificacao = classificacao_dict.get(d.cod_farmacia)
@@ -204,7 +185,7 @@ def _montar_response(
 
     todas_farmacias = set(status_dict.keys()) | set(resultado_coletor.keys())
     status_farmacias = [
-        montar_status_farmacia_response(cod, status_dict.get(cod, "Indisponível"), resultado_coletor.get(cod))
+        montar_status_farmacia_response(cod, status_dict.get(cod, "Indisponível"))  # coletor_bi desativado
         for cod in sorted(todas_farmacias)
     ]
 
