@@ -1,6 +1,6 @@
 """Utilitários de domínio compartilhados entre camadas."""
 import logging
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
