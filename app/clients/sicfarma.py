@@ -113,6 +113,7 @@ def buscar_classificacao_por_codigo(cod_farmacia: str) -> str | None:
 
 
 def buscar_versao_por_codigo(cod_farmacia: str) -> str | None:
+    """Busca a versão do coletor de uma farmácia pelo código via API Sicfarma.
 
     Args:
         cod_farmacia: Código da farmácia a consultar.
@@ -141,6 +142,7 @@ def buscar_versoes_farmacias(codigos: list[str], executor: ThreadPoolExecutor | 
     Args:
         codigos: Lista de códigos de farmácia a consultar.
         executor: ThreadPoolExecutor compartilhado (opcional). Se não fornecido, cria um local.
+    """
 
     if not codigos:
         return {}
@@ -176,6 +178,7 @@ def buscar_classificacao_farmacias(codigos: list[str], executor: ThreadPoolExecu
     Args:
         codigos: Lista de códigos de farmácia a consultar.
         executor: ThreadPoolExecutor compartilhado (opcional). Se não fornecido, cria um local.
+    """
 
     if not codigos:
         return {}
